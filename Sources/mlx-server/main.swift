@@ -172,15 +172,22 @@ struct MLXServer: AsyncParsableCommand {
             } else {
                 // Non-streaming: collect all chunks
                 var fullText = ""
+                var completionTokenCount = 0
                 for await generation in stream {
                     switch generation {
                     case .chunk(let text):
                         fullText += text
+                        completionTokenCount += 1
                     case .info, .toolCall:
                         break
                     }
                 }
                 await semaphore.signal()
+
+                // Approximate prompt tokens (chars / 4 is a reasonable heuristic for most tokenizers)
+                let promptText = chatReq.messages.map { $0.content }.joined(separator: " ")
+                let estimatedPromptTokens = max(1, promptText.count / 4)
+                let totalTokens = estimatedPromptTokens + completionTokenCount
 
                 let resp = ChatCompletionResponse(
                     id: "chatcmpl-\(UUID().uuidString)",
@@ -193,7 +200,7 @@ struct MLXServer: AsyncParsableCommand {
                             finishReason: "stop"
                         )
                     ],
-                    usage: TokenUsage(promptTokens: 0, completionTokens: 0, totalTokens: 0)
+                    usage: TokenUsage(promptTokens: estimatedPromptTokens, completionTokens: completionTokenCount, totalTokens: totalTokens)
                 )
                 let encoded = try JSONEncoder().encode(resp)
                 return Response(
@@ -211,6 +218,25 @@ struct MLXServer: AsyncParsableCommand {
         )
 
         print("[mlx-server] ✅ Ready. Listening on http://\(host):\(port)")
+
+        // ── Emit machine-readable ready event for Aegis integration ──
+        let readyEvent: [String: Any] = [
+            "event": "ready",
+            "port": port,
+            "model": modelId,
+            "engine": "mlx",
+            "vision": false
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: readyEvent),
+           let json = String(data: data, encoding: .utf8) {
+            print(json)
+            fflush(stdout)
+        }
+
+        // ── Handle SIGTERM/SIGINT for graceful shutdown ──
+        // Note: C signal handlers can't safely do complex I/O.
+        // Aegis detects process exit and fires onEngineStopped() automatically.
+
         try await app.runService()
     }
 }
