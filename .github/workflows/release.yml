@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain || true
+
+      - name: Build (Release)
+        run: swift build -c release
+
+      - name: Verify binary
+        run: |
+          ls -lh .build/release/mlx-server
+          file .build/release/mlx-server
+
+      - name: Get version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp .build/release/mlx-server dist/
+          cp LICENSE README.md dist/
+          cd dist && tar -czvf ../mlx-server-${{ steps.version.outputs.tag }}-macos-arm64.tar.gz .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "mlx-server ${{ steps.version.outputs.tag }}"
+          body: |
+            ## mlx-server ${{ steps.version.outputs.tag }}
+
+            Native Swift MLX server with OpenAI-compatible API for Apple Silicon.
+
+            ### Installation
+            ```bash
+            tar -xzf mlx-server-${{ steps.version.outputs.tag }}-macos-arm64.tar.gz
+            ./mlx-server --model mlx-community/Qwen2.5-3B-Instruct-4bit --port 5413
+            ```
+
+            > **Note:** You need `mlx.metallib` next to the binary. See README for instructions.
+          files: |
+            mlx-server-${{ steps.version.outputs.tag }}-macos-arm64.tar.gz
+          draft: false
+          prerelease: false
