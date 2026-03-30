@@ -970,6 +970,7 @@ func handleChatStreaming(
         var completionTokenCount = 0
         var fullText = ""
         var stopped = false
+        var firstToken = true
         for await generation in stream {
             if stopped { break }
             switch generation {
@@ -980,6 +981,13 @@ func handleChatStreaming(
                 if completionTokenCount % 8 == 0 {
                     try? await Task.sleep(for: .microseconds(50))
                 }
+                // Real-time stdout: print token text as it arrives (no newline)
+                if firstToken {
+                    print("srv  generate: prompt=\(promptTokenCount)t | ", terminator: "")
+                    firstToken = false
+                }
+                print(text, terminator: "")
+                fflush(stdout)
                 // ── Stop sequence check ──
                 if let (trimmedText, _) = checkStopSequences(fullText, stopSequences: stopSequences) {
                     let emittedSoFar = fullText.count - text.count
@@ -1017,7 +1025,8 @@ func handleChatStreaming(
                     }
                     cont.yield("data: [DONE]\n\n")
                     cont.finish()
-                    // llama-server style: log full response JSON on one line
+                    // llama-server style: print newline then full response JSON
+                    print("")  // end the real-time token stream line
                     let dur = Date().timeIntervalSince(genStart)
                     let tokPerSec = dur > 0 ? Double(completionTokenCount) / dur : 0
                     let logResp: [String: Any] = [
@@ -1036,6 +1045,7 @@ func handleChatStreaming(
                     if let logData = try? JSONSerialization.data(withJSONObject: logResp),
                        let logStr = String(data: logData, encoding: .utf8) {
                         print("srv  log_server_r: response: \(logStr)")
+                        fflush(stdout)
                     }
                 }
             }
@@ -1069,6 +1079,7 @@ func handleChatNonStreaming(
     var collectedToolCalls: [ToolCallResponse] = []
     var tcIndex = 0
     var generationStopReason: GenerateStopReason = .stop
+    var firstToken = true
     for await generation in stream {
         switch generation {
         case .chunk(let text, _):
@@ -1078,6 +1089,13 @@ func handleChatNonStreaming(
             if completionTokenCount % 8 == 0 {
                 try? await Task.sleep(for: .microseconds(50))
             }
+            // Real-time stdout: print token text as it arrives (no newline)
+            if firstToken {
+                print("srv  generate: prompt=\(promptTokenCount)t | ", terminator: "")
+                firstToken = false
+            }
+            print(text, terminator: "")
+            fflush(stdout)
         case .toolCall(let tc):
             let argsJson = serializeToolCallArgs(tc.function.arguments)
             collectedToolCalls.append(ToolCallResponse(
@@ -1090,6 +1108,7 @@ func handleChatNonStreaming(
             generationStopReason = info.stopReason
         }
     }
+    print("")  // end the real-time token stream line
     let duration = Date().timeIntervalSince(genStart)
     await stats.requestFinished(tokens: completionTokenCount, duration: duration)
     await semaphore.signal()
@@ -1145,6 +1164,7 @@ func handleChatNonStreaming(
     // llama-server style: log full response JSON on one line
     if let responseStr = String(data: encoded, encoding: .utf8) {
         print("srv  log_server_r: response: \(responseStr)")
+        fflush(stdout)
     }
     return Response(
         status: .ok,
