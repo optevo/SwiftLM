@@ -789,9 +789,24 @@ extern "C" int mlx_fast_turbo_encode(
     int k_bits,
     const mlx_stream s) {
     try {
-        // TurboQuant C++ core not yet implemented — stub returns error.
-        // Will be wired up when mlx::core::fast::turbo_encode() is available.
-        throw std::runtime_error("turbo_encode: not yet implemented in this build");
+        // Encode K: 3-bit PolarQuant + 1-bit QJL, packed into [.., 68] uint8
+        mlx_array_set_(
+            *res_polar_k,
+            mlx::core::fast::turbo_encode_k(
+                mlx_array_get_(keys),
+                mlx_stream_get_(s)));
+
+        // Encode V: 3-bit PolarQuant only, packed into [.., 50] uint8
+        mlx_array_set_(
+            *res_polar_v,
+            mlx::core::fast::turbo_encode_v(
+                mlx_array_get_(values),
+                mlx_stream_get_(s)));
+
+        // Metadata is packed inline — residual arrays are unused but must be
+        // valid (non-null ctx) so the Swift bridge can call mlx_array_free on them.
+        *res_residual_k = mlx_array_new();
+        *res_residual_v = mlx_array_new();
     } catch (std::exception& e) {
         mlx_error(e.what());
         return 1;

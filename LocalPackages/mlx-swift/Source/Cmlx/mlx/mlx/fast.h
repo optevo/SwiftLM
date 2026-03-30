@@ -100,4 +100,22 @@ MLX_API std::vector<array> precompiled_cuda_kernel(
     bool ensure_row_contiguous = false,
     StreamOrDevice s = {});
 
+/**
+ * Compress a K-cache tensor to TurboQuant format (3-bit PolarQuant + 1-bit QJL).
+ *
+ * keys: [batch, heads, seq, 128] — fp16 / bf16 / fp32
+ * returns: uint8 array with the same leading dims and last dim = 68
+ *          Layout per token: indices[48] | qjl_signs[16] | norm_fp16[2] | rnorm_fp16[2]
+ */
+MLX_API array turbo_encode_k(const array& keys, StreamOrDevice s = {});
+
+/**
+ * Compress a V-cache tensor to TurboQuant format (3-bit PolarQuant only).
+ *
+ * values: [batch, heads, seq, 128] — fp16 / bf16 / fp32
+ * returns: uint8 array with the same leading dims and last dim = 50
+ *          Layout per token: indices[48] | norm_fp16[2]
+ */
+MLX_API array turbo_encode_v(const array& values, StreamOrDevice s = {});
+
 } // namespace mlx::core::fast

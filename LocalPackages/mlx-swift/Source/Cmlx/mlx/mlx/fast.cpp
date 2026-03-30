@@ -933,9 +933,109 @@ std::vector<Shape> Quantize::output_shapes(const std::vector<array>& inputs) {
   }
 }
 
+
 bool ConvertFP8::is_equivalent(const Primitive& other) const {
   const ConvertFP8& a_other = static_cast<const ConvertFP8&>(other);
   return to_fp8_ == a_other.to_fp8_;
+}
+
+} // namespace mlx::core::fast
+
+// ---------------------------------------------------------------------------
+// TurboQuant KV-cache compression — CPU encode path
+// ---------------------------------------------------------------------------
+// turbo_quant.h opens its own  namespace mlx::core::fast so it must be
+// included OUTSIDE our namespace block to avoid double-nesting.
+//
+// K record layout (68 bytes per head_dim=128 vector):
+//   [  0.. 47] indices[48]    — 3-bit PolarQuant indices, LSB-packed
+//   [ 48.. 63] qjl_signs[16]  — 1-bit QJL sign bits
+//   [ 64.. 65] norm_fp16[2]   — original L2 norm as fp16
+//   [ 66.. 67] rnorm_fp16[2]  — residual L2 norm as fp16
+//
+// V record layout (50 bytes per head_dim=128 vector):
+//   [  0.. 47] indices[48]    — 3-bit PolarQuant indices, LSB-packed
+//   [ 48.. 49] norm_fp16[2]   — corrected L2 norm as fp16
+
+#include "mlx/fast/turbo_quant.h"  // brings in mlx::core::fast types
+
+namespace {
+// Record byte sizes — must match sdpa_vector.h (Metal decompression kernel).
+static constexpr int TURBO_K_RECORD = 68;
+static constexpr int TURBO_V_RECORD = 50;
+} // anonymous namespace
+
+namespace mlx::core::fast {
+
+// Helper: materialise the array as float32 on the CPU and return a raw ptr.
+// The returned array object must stay alive for the duration of the loop.
+static std::pair<mlx::core::array, const float*>
+turbo_to_f32(const mlx::core::array& x, mlx::core::StreamOrDevice s) {
+  auto x_f32 = mlx::core::astype(x, mlx::core::float32, s);
+  mlx::core::eval(x_f32);
+  return {x_f32, x_f32.data<float>()};
+}
+
+array turbo_encode_k(const array& keys, StreamOrDevice s_) {
+  auto s = to_stream(s_);
+
+  if (keys.shape(-1) != ::mlx::core::fast::TURBO_D) {
+    throw std::invalid_argument(
+        "[turbo_encode_k] last dim (head_dim) must be " +
+        std::to_string(::mlx::core::fast::TURBO_D) + " but got " +
+        std::to_string(keys.shape(-1)));
+  }
+
+  auto [keys_f32, src] = turbo_to_f32(keys, s);
+  const int N = static_cast<int>(keys_f32.size() / ::mlx::core::fast::TURBO_D);
+
+  std::vector<uint8_t> buf(static_cast<size_t>(N) * TURBO_K_RECORD, 0u);
+
+  for (int i = 0; i < N; ++i) {
+    ::mlx::core::fast::TurboQuantK rec =
+        ::mlx::core::fast::turbo_quantize_k(
+            src + i * ::mlx::core::fast::TURBO_D,
+            ::mlx::core::fast::TURBO_D);
+    uint8_t* dst = buf.data() + i * TURBO_K_RECORD;
+    std::memcpy(dst,      rec.indices,     48);
+    std::memcpy(dst + 48, rec.qjl_signs,   16);
+    std::memcpy(dst + 64, &rec.norm_fp16,   2);
+    std::memcpy(dst + 66, &rec.rnorm_fp16,  2);
+  }
+
+  Shape out_shape = keys.shape();
+  out_shape.back() = TURBO_K_RECORD;
+  return array(buf.data(), out_shape, uint8);
+}
+
+array turbo_encode_v(const array& values, StreamOrDevice s_) {
+  auto s = to_stream(s_);
+
+  if (values.shape(-1) != ::mlx::core::fast::TURBO_D) {
+    throw std::invalid_argument(
+        "[turbo_encode_v] last dim (head_dim) must be " +
+        std::to_string(::mlx::core::fast::TURBO_D) + " but got " +
+        std::to_string(values.shape(-1)));
+  }
+
+  auto [vals_f32, src] = turbo_to_f32(values, s);
+  const int N = static_cast<int>(vals_f32.size() / ::mlx::core::fast::TURBO_D);
+
+  std::vector<uint8_t> buf(static_cast<size_t>(N) * TURBO_V_RECORD, 0u);
+
+  for (int i = 0; i < N; ++i) {
+    ::mlx::core::fast::TurboQuantV rec =
+        ::mlx::core::fast::turbo_quantize_v(
+            src + i * ::mlx::core::fast::TURBO_D,
+            ::mlx::core::fast::TURBO_D);
+    uint8_t* dst = buf.data() + i * TURBO_V_RECORD;
+    std::memcpy(dst,      rec.indices,    48);
+    std::memcpy(dst + 48, &rec.norm_fp16,  2);
+  }
+
+  Shape out_shape = values.shape();
+  out_shape.back() = TURBO_V_RECORD;
+  return array(buf.data(), out_shape, uint8);
 }
 
 } // namespace mlx::core::fast
