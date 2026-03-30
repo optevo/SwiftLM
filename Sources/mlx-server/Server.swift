@@ -990,6 +990,12 @@ func handleChatStreaming(
                     }
                     cont.yield("data: [DONE]\n\n")
                     cont.finish()
+                    // llama-server style generation log
+                    let dur = Date().timeIntervalSince(genStart)
+                    let tokPerSec = dur > 0 ? Double(completionTokenCount) / dur : 0
+                    let preview = String(fullText.prefix(120)).replacingOccurrences(of: "\n", with: " ")
+                    let suffix = fullText.count > 120 ? "..." : ""
+                    print("[mlx-server] prompt=\(promptTokenCount)t, gen=\(completionTokenCount)t, speed=\(String(format: "%.2f", tokPerSec))t/s [stream] | \(preview)\(suffix)")
                 }
             }
         }
@@ -1046,6 +1052,11 @@ func handleChatNonStreaming(
     let duration = Date().timeIntervalSince(genStart)
     await stats.requestFinished(tokens: completionTokenCount, duration: duration)
     await semaphore.signal()
+
+    // ── llama-server style generation log ──
+    let tokPerSec = duration > 0 ? Double(completionTokenCount) / duration : 0
+    let outputPreview = fullText.prefix(120).replacingOccurrences(of: "\n", with: " ")
+    print("[mlx-server] prompt=\(promptTokenCount)t, gen=\(completionTokenCount)t, speed=\(String(format: "%.2f", tokPerSec))t/s | \(outputPreview)\(fullText.count > 120 ? "..." : "")")
 
     // ── Apply stop sequences to final text ──
     var finishReason: String
