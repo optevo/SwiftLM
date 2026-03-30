@@ -990,12 +990,26 @@ func handleChatStreaming(
                     }
                     cont.yield("data: [DONE]\n\n")
                     cont.finish()
-                    // llama-server style generation log
+                    // llama-server style: log full response JSON on one line
                     let dur = Date().timeIntervalSince(genStart)
                     let tokPerSec = dur > 0 ? Double(completionTokenCount) / dur : 0
-                    let preview = String(fullText.prefix(120)).replacingOccurrences(of: "\n", with: " ")
-                    let suffix = fullText.count > 120 ? "..." : ""
-                    print("[mlx-server] prompt=\(promptTokenCount)t, gen=\(completionTokenCount)t, speed=\(String(format: "%.2f", tokPerSec))t/s [stream] | \(preview)\(suffix)")
+                    let logResp: [String: Any] = [
+                        "choices": [[
+                            "index": 0,
+                            "message": ["role": "assistant", "content": fullText],
+                            "finish_reason": reason
+                        ]],
+                        "usage": [
+                            "prompt_tokens": promptTokenCount,
+                            "completion_tokens": completionTokenCount,
+                            "total_tokens": promptTokenCount + completionTokenCount
+                        ],
+                        "timings": ["predicted_per_second": tokPerSec]
+                    ]
+                    if let logData = try? JSONSerialization.data(withJSONObject: logResp),
+                       let logStr = String(data: logData, encoding: .utf8) {
+                        print("srv  log_server_r: response: \(logStr)")
+                    }
                 }
             }
         }
@@ -1053,10 +1067,7 @@ func handleChatNonStreaming(
     await stats.requestFinished(tokens: completionTokenCount, duration: duration)
     await semaphore.signal()
 
-    // ── llama-server style generation log ──
-    let tokPerSec = duration > 0 ? Double(completionTokenCount) / duration : 0
-    let outputPreview = fullText.prefix(120).replacingOccurrences(of: "\n", with: " ")
-    print("[mlx-server] prompt=\(promptTokenCount)t, gen=\(completionTokenCount)t, speed=\(String(format: "%.2f", tokPerSec))t/s | \(outputPreview)\(fullText.count > 120 ? "..." : "")")
+
 
     // ── Apply stop sequences to final text ──
     var finishReason: String
@@ -1104,6 +1115,10 @@ func handleChatNonStreaming(
         usage: TokenUsage(promptTokens: promptTokenCount, completionTokens: completionTokenCount, totalTokens: totalTokens)
     )
     let encoded = try JSONEncoder().encode(resp)
+    // llama-server style: log full response JSON on one line
+    if let responseStr = String(data: encoded, encoding: .utf8) {
+        print("srv  log_server_r: response: \(responseStr)")
+    }
     return Response(
         status: .ok,
         headers: jsonHeaders(),
