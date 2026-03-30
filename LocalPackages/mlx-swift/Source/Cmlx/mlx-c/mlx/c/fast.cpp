@@ -789,18 +789,9 @@ extern "C" int mlx_fast_turbo_encode(
     int k_bits,
     const mlx_stream s) {
     try {
-        // Evaluate the TurboQuant primitive to get PolarQuant tensors
-        auto qkv = mlx::core::fast::turbo_encode(
-            mlx_array_get_(keys),
-            mlx_array_get_(values),
-            k_bits,
-            mlx_stream_get_(s).device
-        );
-
-        mlx_array_set_(*res_polar_k, qkv.polar_keys);
-        mlx_array_set_(*res_polar_v, qkv.polar_values);
-        mlx_array_set_(*res_residual_k, qkv.qjl_key_residuals);
-        mlx_array_set_(*res_residual_v, qkv.qjl_value_residuals);
+        // TurboQuant C++ core not yet implemented — stub returns error.
+        // Will be wired up when mlx::core::fast::turbo_encode() is available.
+        throw std::runtime_error("turbo_encode: not yet implemented in this build");
     } catch (std::exception& e) {
         mlx_error(e.what());
         return 1;
