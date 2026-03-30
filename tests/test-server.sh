@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-server.sh — Integration tests for mlx-server
+# test-server.sh — Integration tests for SwiftLM
 #
 # Usage:
 #   ./tests/test-server.sh [binary_path] [port]
@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-BINARY="${1:-.build/release/mlx-server}"
+BINARY="${1:-.build/release/SwiftLM}"
 PORT="${2:-15413}"
 HOST="127.0.0.1"
 MODEL="mlx-community/Qwen2.5-0.5B-Instruct-4bit"  # Smallest model for CI

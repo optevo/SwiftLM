@@ -24,9 +24,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-SwiftLM-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-
+            ${{ runner.os }}-spm-SwiftLM-
+
+      - name: Clear stale module cache
+        # Prevents: "PCH was compiled with module cache path '…mlx-server…'
+        # but the path is currently '…SwiftLM…'" after repo rename.
+        run: find .build -type d -name ModuleCache -exec rm -rf {} + 2>/dev/null || true
 
       - name: Build (Release)
         run: swift build -c release
