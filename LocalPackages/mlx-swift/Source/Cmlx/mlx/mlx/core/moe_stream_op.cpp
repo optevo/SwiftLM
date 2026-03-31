@@ -115,17 +115,23 @@ public:
                               << count << " chunks | avg "
                               << std::setprecision(3) << avg_ms_per_chunk << " ms/chunk";
 
-                    // Append TurboKV window stats if active
-                    uint64_t tkv_tokens = g_turbo_tokens.exchange(0);
+                    // Append TurboKV window stats if active.
+                    // Token count is NOT shown — it is multiplied by num_kv_layers
+                    // and would be misleading. Ratio and bytes saved are layer-agnostic
+                    // because the layer factor cancels in orig/packed.
+                    uint64_t tkv_tokens = g_turbo_tokens.exchange(0);  // reset only
                     uint64_t tkv_orig   = g_turbo_bytes_orig.exchange(0);
                     uint64_t tkv_packed = g_turbo_bytes_packed.exchange(0);
-                    if (tkv_tokens > 0 && tkv_packed > 0) {
-                        double ratio = (tkv_orig > 0) ? (double)tkv_orig / tkv_packed : 0.0;
-                        std::cerr << std::fixed << std::setprecision(0)
-                                  << " | 🗜 TurboKV " << tkv_tokens << "t "
-                                  << std::setprecision(1) << ratio << "x";
+                    (void)tkv_tokens;
+                    if (tkv_packed > 0 && tkv_orig > tkv_packed) {
+                        double ratio    = (double)tkv_orig / tkv_packed;
+                        double saved_mb = (tkv_orig - tkv_packed) / 1048576.0;
+                        std::cerr << std::fixed << std::setprecision(1)
+                                  << " | \U0001f5dc TurboKV " << ratio << "x"
+                                  << " (" << std::setprecision(0) << saved_mb << "MB saved)";
                     }
                     std::cerr << std::endl;
+
 
                 }
             }
