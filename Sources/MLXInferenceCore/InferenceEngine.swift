@@ -33,6 +33,9 @@ public struct GenerationToken: Sendable {
 public final class InferenceEngine: ObservableObject {
     @Published public private(set) var state: ModelState = .idle
 
+    /// Shared download manager — exposes download progress and local cache state.
+    public let downloadManager = ModelDownloadManager()
+
     private var container: ModelContainer?
     private var currentModelId: String?
     private var generationTask: Task<Void, Never>?
@@ -49,19 +52,27 @@ public final class InferenceEngine: ObservableObject {
         currentModelId = modelId
 
         do {
-            // Configure download progress reporting
             let config = ModelConfiguration(id: modelId)
             container = try await LLMModelFactory.shared.loadContainer(
                 configuration: config
             ) { [weak self] progress in
                 Task { @MainActor in
+                    guard let self else { return }
                     let pct = progress.fractionCompleted
-                    let speed = progress.throughput.map { String(format: "%.1f MB/s", $0 / 1_000_000) } ?? ""
-                    self?.state = .downloading(progress: pct, speed: speed)
+                    let speedMBps = progress.throughput.map { $0 / 1_000_000 }
+                    let speedStr = speedMBps.map { String(format: "%.1f MB/s", $0) } ?? ""
+                    self.state = .downloading(progress: pct, speed: speedStr)
+                    self.downloadManager.updateProgress(ModelDownloadProgress(
+                        modelId: modelId,
+                        fractionCompleted: pct,
+                        speedMBps: speedMBps
+                    ))
                 }
             }
+            downloadManager.completeDownload(modelId: modelId)
             state = .ready(modelId: modelId)
         } catch {
+            downloadManager.cancelDownload(modelId: modelId)
             state = .error("Failed to load \(modelId): \(error.localizedDescription)")
             container = nil
         }
