@@ -24,6 +24,20 @@ static std::atomic<uint64_t> g_lifetime_chunks{0};
 // Last-window throughput (MB/s) — written after each 10s window closes
 static std::atomic<double>   g_window_throughput_mbs{0.0};
 
+// TurboKV aggregate counters — incremented from Swift on every compression event.
+// Read + reset each 10-second window alongside the SSD stats.
+static std::atomic<uint64_t> g_turbo_tokens{0};
+static std::atomic<uint64_t> g_turbo_bytes_orig{0};
+static std::atomic<uint64_t> g_turbo_bytes_packed{0};
+
+extern "C" void mlx_turbo_kv_record(uint64_t tokens, uint64_t orig_bytes, uint64_t packed_bytes) {
+    g_turbo_tokens.fetch_add(tokens, std::memory_order_relaxed);
+    g_turbo_bytes_orig.fetch_add(orig_bytes, std::memory_order_relaxed);
+    g_turbo_bytes_packed.fetch_add(packed_bytes, std::memory_order_relaxed);
+}
+
+
+
 namespace mlx::core {
 
 class LoadSSDExpert : public Primitive {
@@ -99,8 +113,20 @@ public:
                               << std::fixed << std::setprecision(0);
                     std::cerr << throughput_mbs << " MB/s | "
                               << count << " chunks | avg "
-                              << std::setprecision(3) << avg_ms_per_chunk << " ms/chunk"
-                              << std::endl;
+                              << std::setprecision(3) << avg_ms_per_chunk << " ms/chunk";
+
+                    // Append TurboKV window stats if active
+                    uint64_t tkv_tokens = g_turbo_tokens.exchange(0);
+                    uint64_t tkv_orig   = g_turbo_bytes_orig.exchange(0);
+                    uint64_t tkv_packed = g_turbo_bytes_packed.exchange(0);
+                    if (tkv_tokens > 0 && tkv_packed > 0) {
+                        double ratio = (tkv_orig > 0) ? (double)tkv_orig / tkv_packed : 0.0;
+                        std::cerr << std::fixed << std::setprecision(0)
+                                  << " | 🗜 TurboKV " << tkv_tokens << "t "
+                                  << std::setprecision(1) << ratio << "x";
+                    }
+                    std::cerr << std::endl;
+
                 }
             }
         }

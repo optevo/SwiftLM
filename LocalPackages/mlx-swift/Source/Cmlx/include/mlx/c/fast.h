@@ -249,6 +249,10 @@ typedef struct MlxSSDMetricsSnapshot {
 
 void mlx_ssd_metrics_snapshot(MlxSSDMetricsSnapshot* out);
 
+// TurboKV telemetry — call from Swift on each compression event to accumulate
+// stats that appear in the 10-second SSD stream log.
+void mlx_turbo_kv_record(uint64_t tokens, uint64_t orig_bytes, uint64_t packed_bytes);
+
 #ifdef __cplusplus
 }
 #endif
