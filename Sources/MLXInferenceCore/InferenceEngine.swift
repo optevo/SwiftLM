@@ -186,6 +186,8 @@ public final class InferenceEngine: ObservableObject {
 
     /// Load a model by HuggingFace ID. Downloads if not cached.
     /// Uses ModelStorage.cacheRoot as the HubApi download base.
+    /// For MoE models, activates expert streaming via ExpertStreamingConfig so
+    /// only active expert weights are resident in RAM during inference.
     public func load(modelId: String) async {
         guard state != .ready(modelId: modelId) else { return }
         guard !thermalLevel.isThrottled else {
@@ -197,10 +199,29 @@ public final class InferenceEngine: ObservableObject {
         currentModelId = modelId
 
         do {
-            // Point HubApi at ModelStorage.cacheRoot so downloads land in the right
-            // place on both platforms (macOS: ~/.cache/HF, iOS: Application Support)
             let hub = HubApi(downloadBase: ModelStorage.cacheRoot)
-            let config = ModelConfiguration(id: modelId)
+
+            // For MoE models, enable expert streaming before loading so
+            // loadWeights() initialises ExpertStreamerManager correctly.
+            // lazyLoad=true means weights are mmap'd and not paged into RAM
+            // at load time — only active expert pages touch RAM during inference.
+            var config = ModelConfiguration(id: modelId)
+            let isMoE = ModelCatalog.all.first(where: { $0.id == modelId })?.isMoE ?? false
+            if isMoE {
+                config.lazyLoad = true
+                let modelDir = ModelStorage.snapshotDirectory(for: modelId)
+                // directIO=true on macOS (5 GB/s NVMe pread), false on iOS (mmap fallback)
+                ExpertStreamingConfig.shared.activate(
+                    modelDirectory: modelDir,
+                    useDirectIO: {
+                        #if os(macOS)
+                        return true
+                        #else
+                        return false
+                        #endif
+                    }()
+                )
+            }
 
             container = try await LLMModelFactory.shared.loadContainer(
                 hub: hub,
@@ -229,6 +250,7 @@ public final class InferenceEngine: ObservableObject {
             state = .ready(modelId: modelId)
 
         } catch {
+            ExpertStreamingConfig.shared.deactivate()
             downloadManager.clearProgress(modelId: modelId)
             state = .error("Failed to load \(modelId): \(error.localizedDescription)")
             container = nil
@@ -241,6 +263,7 @@ public final class InferenceEngine: ObservableObject {
         container = nil
         currentModelId = nil
         state = .idle
+        ExpertStreamingConfig.shared.deactivate()
         MLX.GPU.set(cacheLimit: 0)
     }
 

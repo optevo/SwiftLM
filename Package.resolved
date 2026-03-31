@@ -5,8 +5,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swift-server/async-http-client.git",
       "state" : {
-        "revision" : "c5784ca81535cc6a92d900f84abd070dfb0e9392",
-        "version" : "1.32.1"
+        "revision" : "3a5b74a58782c3b4c1f0bc75e9b67b10c2494e8f",
+        "version" : "1.33.1"
       }
     },
     {
@@ -23,8 +23,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/hummingbird-project/hummingbird",
       "state" : {
-        "revision" : "282f55d605bf9324d2da7cbebbf30112a0ae575d",
-        "version" : "2.21.0"
+        "revision" : "d1ce7bbd2f1b17f22031ca4c0daeb39eff07a92e",
+        "version" : "2.21.1"
       }
     },
     {
@@ -149,8 +149,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/huggingface/swift-jinja.git",
       "state" : {
-        "revision" : "f731f03bf746481d4fda07f817c3774390c4d5b9",
-        "version" : "2.3.2"
+        "revision" : "0aeefadec459ce8e11a333769950fb86183aca43",
+        "version" : "2.3.5"
       }
     },
     {
@@ -158,8 +158,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-log.git",
       "state" : {
-        "revision" : "bbd81b6725ae874c69e9b8c8804d462356b55523",
-        "version" : "1.10.1"
+        "revision" : "8c0f217f01000dd30f60d6e536569ad4e74291f9",
+        "version" : "1.11.0"
       }
     },
     {
@@ -176,8 +176,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-nio.git",
       "state" : {
-        "revision" : "b31565862a8f39866af50bc6676160d8dda7de35",
-        "version" : "2.96.0"
+        "revision" : "558f24a4647193b5a0e2104031b71c55d31ff83a",
+        "version" : "2.97.1"
       }
     },
     {
@@ -194,8 +194,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-nio-http2.git",
       "state" : {
-        "revision" : "9019b76fa858564a27e0aab13c01987d6e2869fa",
-        "version" : "1.41.0"
+        "revision" : "6d8d596f0a9bfebb925733003731fe2d749b7e02",
+        "version" : "1.42.0"
       }
     },
     {
@@ -239,8 +239,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swift-server/swift-service-lifecycle.git",
       "state" : {
-        "revision" : "89888196dd79c61c50bca9a103d8114f32e1e598",
-        "version" : "2.10.1"
+        "revision" : "9829955b385e5bb88128b73f1b8389e9b9c3191a",
+        "version" : "2.11.0"
       }
     },
     {
@@ -257,8 +257,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/huggingface/swift-transformers",
       "state" : {
-        "revision" : "eed7264ac5e4ec5dfa6165c6e5c5577364344fe4",
-        "version" : "1.2.0"
+        "revision" : "58c4bc11963a140358d791f678a60a2745a23146",
+        "version" : "1.2.1"
       }
     },
     {

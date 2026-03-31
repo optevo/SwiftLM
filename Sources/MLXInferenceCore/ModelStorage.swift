@@ -47,6 +47,14 @@ public enum ModelStorage {
     }
 
     /// True if a model's cache directory exists and contains files.
+    // The snapshot directory is where safetensors files live inside the HF hub layout:
+    // <cacheRoot>/models--org--name/snapshots/main/
+    public static func snapshotDirectory(for modelId: String) -> URL {
+        return cacheRoot
+            .appendingPathComponent(hubDirName(for: modelId))
+            .appendingPathComponent("snapshots/main")
+    }
+
     public static func isDownloaded(_ modelId: String) -> Bool {
         guard let dir = cacheDirectory(for: modelId) else { return false }
         // Must have a snapshots subdirectory with content

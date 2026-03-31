@@ -114,12 +114,35 @@ public enum ModelCatalog {
             ramRecommendedGB: 24.0,
             badge: "🔬 Expert"
         ),
+        // ── MoE models: ramRequiredGB = peak-resident (active experts only via mmap streaming)
+        // File sizes are much larger but only active expert pages are in RAM at inference time.
+        // These run via ExpertStreamingConfig on iPad Pro M4 (16GB+) and macOS.
+        ModelEntry(
+            id: "mlx-community/Qwen3-30B-MoE-4bit",
+            displayName: "Qwen 3 30B MoE",
+            parameterSize: "30B (active 3B)",
+            quantization: "4-bit",
+            ramRequiredGB: 4.5,         // Dense layers ~3GB + top-2 active experts ~1.5GB
+            ramRecommendedGB: 8.0,
+            isMoE: true,
+            badge: "⚡ MoE Fast"
+        ),
+        ModelEntry(
+            id: "mlx-community/DeepSeek-R1-0528-4bit",
+            displayName: "DeepSeek R1 0528",
+            parameterSize: "671B (active 37B)",
+            quantization: "4-bit",
+            ramRequiredGB: 8.0,         // Dense ~6GB + active MoE experts ~2GB
+            ramRecommendedGB: 16.0,
+            isMoE: true,
+            badge: "🧠 Reasoning"
+        ),
         ModelEntry(
             id: "mlx-community/Qwen3.5-122B-A10B-4bit",
             displayName: "Qwen 3.5 122B (MoE)",
-            parameterSize: "122B",
+            parameterSize: "122B (active 10B)",
             quantization: "4-bit",
-            ramRequiredGB: 20.0,
+            ramRequiredGB: 12.0,        // Dense ~8GB + active experts ~4GB
             ramRecommendedGB: 48.0,
             isMoE: true,
             badge: "💎 Flagship"
