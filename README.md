@@ -58,6 +58,21 @@ To run the extreme context benchmark suite on your device, execute:
 bash tests/run_extreme_context.sh <model-id>
 ```
 
+### Prompt Cache & Sliding Window Regression Test
+To verify the stability of the prompt cache when interleaving long contexts with sliding window attention (e.g. Gemma 4/Mistral 3), run this extreme test sequence:
+```bash
+# 1. Start the server with a large sliding-window MoE model
+./SwiftLM --model mlx-community/gemma-4-26b-a4b-it-4bit --port 5431 --turbo-kv --stream-experts --ctx-size 16384
+
+# 2. Run the 4-request sliding window regression test:
+echo "=== Req 1 (Big 5537t) ===" && curl -sS --max-time 120 http://127.0.0.1:5431/v1/chat/completions -H "Content-Type: application/json" -d @/tmp/big_prompt.json 2>&1 | python3 -c "import sys,json;d=json.load(sys.stdin);print('OK:',d['choices'][0]['message']['content'])" && \
+echo "=== Req 2 (Short 18t) ===" && curl -sS --max-time 60 http://127.0.0.1:5431/v1/chat/completions -H "Content-Type: application/json" -d '{"messages":[{"role":"user","content":"What is today?"}],"max_tokens":30}' 2>&1 | python3 -c "import sys,json;d=json.load(sys.stdin);print('OK:',d['choices'][0]['message']['content'])" && \
+echo "=== Req 3 (Big 5537t) ===" && curl -sS --max-time 120 http://127.0.0.1:5431/v1/chat/completions -H "Content-Type: application/json" -d @/tmp/big_prompt.json 2>&1 | python3 -c "import sys,json;d=json.load(sys.stdin);print('OK:',d['choices'][0]['message']['content'])" && \
+echo "=== Req 4 (Big Full Cache Hit) ===" && curl -sS --max-time 120 http://127.0.0.1:5431/v1/chat/completions -H "Content-Type: application/json" -d @/tmp/big_prompt.json 2>&1 | python3 -c "import sys,json;d=json.load(sys.stdin);print('OK:',d['choices'][0]['message']['content'])" && \
+echo "=== ALL 4 PASSED ==="
+```
+If you see `ALL 4 PASSED` without `SIGTRAP` or `curl: (52) Empty reply from server`, the memory bounds are stable.
+
 ### Extreme Context Performance (100K Tokens)
 Tested on M5 Pro (64GB) handling a monolithic **100,000 token** system prompt with **TurboKV Acceleration** enabled.
 
@@ -212,7 +227,7 @@ curl http://localhost:5413/v1/chat/completions \
 
 ## 📖 Development Journal & The "Aha!" Moment
 
-The stabilization of the Gemma 4 inference engine on Apple Silicon is fully chronicled in our [Development Journal](journal.md.resolved).
+The stabilization of the Gemma 4 inference engine on Apple Silicon is fully chronicled in our [Development Journal](journal.md).
 
 **The "2+2=4" Aha Moment**: During development, we encountered a severe "silent failure" where the model would successfully load and evaluate all 32 layers at high speed, but generate nothing but infinite whitespace. The model logits showed the correct *shape* but the wrong *magnitudes*. 
 

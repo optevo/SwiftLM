@@ -786,9 +786,18 @@ actor PromptCache {
     private var misses: Int = 0
 
     /// Save the full prompt token sequence and its KV state.
+    /// IMPORTANT: We must eval() the state arrays immediately. The state getter may
+    /// produce lazy computation graphs (e.g. TurboKV decode → reshape → concatenate).
+    /// If not materialized now, those lazy references point to the live cache tensors
+    /// which get overwritten by subsequent requests, causing stale data / SIGTRAP on restore.
     func save(tokens: [Int], cache: [KVCache]) {
         let states = cache.map { $0.state }
         let metaStates = cache.map { $0.metaState }
+        // Materialize all lazy MLX arrays so they survive cache mutations
+        let allArrays = states.flatMap { $0 }
+        if !allArrays.isEmpty {
+            eval(allArrays)
+        }
         cached = CachedState(tokens: tokens, states: states, metaStates: metaStates)
     }
 
@@ -810,14 +819,30 @@ actor PromptCache {
             misses += 1
             return nil
         }
-        // Restore full cached KV state into each layer
+        // Pre-flight safety check: compute the minimum sequence length across
+        // all cached layers. Sliding-window layers (RotatingKVCache) store far
+        // fewer tokens than the full prompt (e.g. 1440 vs 5537). If the trim
+        // would zero-out any layer, bail BEFORE touching the live cache.
+        let excess = cached.tokens.count - matchLen
+        if excess > 0 {
+            // The state getter stores keys as the first element: [B, H, T, D]
+            // dim(2) = T = the number of cached tokens for that layer.
+            let minCachedSeqLen = cached.states.map { arrays -> Int in
+                guard let firstArray = arrays.first else { return 0 }
+                return firstArray.dim(2)  // T dimension
+            }.min() ?? 0
+            if excess >= minCachedSeqLen {
+                // Trim would empty or corrupt at least one layer → treat as miss
+                misses += 1
+                return nil
+            }
+        }
+        // Safe to restore: trim won't corrupt any layer
         for i in 0..<min(cache.count, cached.states.count) {
             var layer = cache[i]
             layer.state = cached.states[i]
             layer.metaState = cached.metaStates[i]
         }
-        // Trim excess if we only matched a partial prefix
-        let excess = cached.tokens.count - matchLen
         if excess > 0 {
             for layer in cache { layer.trim(excess) }
         }
@@ -971,20 +996,19 @@ func handleChatCompletion(
             }
             let remainingTokens = lmInput.text.tokens[startIndex...]
             let trimmedInput = LMInput(tokens: remainingTokens)
-            return try MLXLMCommon.generate(
+            let stream = try MLXLMCommon.generate(
                 input: trimmedInput, cache: cache, parameters: params, context: context
             )
+            // Save prompt tokens + KV state synchronously after the partial prefill.
+            await promptCache.save(tokens: promptTokens, cache: cache)
+            return stream
         } else {
             // Cache miss: process the full prompt.
             let stream = try MLXLMCommon.generate(
                 input: lmInput, cache: cache, parameters: params, context: context
             )
-            // Save full prompt tokens + KV state so the next request can prefix-match
-            // any shared prefix (system prompt, conversation history, long documents, etc.)
-            Task {
-                try? await Task.sleep(for: .milliseconds(100))
-                await promptCache.save(tokens: promptTokens, cache: cache)
-            }
+            // Save prompt tokens + KV state synchronously after the full prefill.
+            await promptCache.save(tokens: promptTokens, cache: cache)
             return stream
         }
     }
