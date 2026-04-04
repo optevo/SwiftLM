@@ -14,10 +14,61 @@ import CoreImage
 import Foundation
 import HTTPTypes
 import Hummingbird
+import Hub
 import MLX
 import MLXLLM
 import MLXLMCommon
 import MLXVLM
+import Tokenizers
+
+// ── Hub/Tokenizer bridges (Downloader + TokenizerLoader conformances) ─────────
+
+private struct HubDownloader: Downloader, Sendable {
+    let hub: HubApi
+    func download(
+        id: String, revision: String?,
+        matching patterns: [String],
+        useLatest: Bool,
+        progressHandler: @Sendable @escaping (Progress) -> Void
+    ) async throws -> URL {
+        try await hub.snapshot(from: id, matching: patterns, progressHandler: progressHandler)
+    }
+}
+
+private struct TransformersTokenizerLoader: TokenizerLoader, Sendable {
+    func load(from directory: URL) async throws -> any MLXLMCommon.Tokenizer {
+        let t = try await AutoTokenizer.from(modelFolder: directory)
+        return TransformersTokenizerBridge(t)
+    }
+}
+
+private struct TransformersTokenizerBridge: MLXLMCommon.Tokenizer, Sendable {
+    let upstream: any Tokenizers.Tokenizer
+    init(_ upstream: any Tokenizers.Tokenizer) { self.upstream = upstream }
+    func encode(text: String, addSpecialTokens: Bool) -> [Int] {
+        upstream.encode(text: text, addSpecialTokens: addSpecialTokens)
+    }
+    func decode(tokenIds: [Int], skipSpecialTokens: Bool) -> String {
+        upstream.decode(tokens: tokenIds, skipSpecialTokens: skipSpecialTokens)
+    }
+    func convertTokenToId(_ token: String) -> Int? { upstream.convertTokenToId(token) }
+    func convertIdToToken(_ id: Int) -> String? { upstream.convertIdToToken(id) }
+    var bosToken: String? { upstream.bosToken }
+    var eosToken: String? { upstream.eosToken }
+    var unknownToken: String? { upstream.unknownToken }
+    func applyChatTemplate(
+        messages: [[String: any Sendable]],
+        tools: [[String: any Sendable]]?,
+        additionalContext: [String: any Sendable]?
+    ) throws -> [Int] {
+        do {
+            return try upstream.applyChatTemplate(
+                messages: messages, tools: tools, additionalContext: additionalContext)
+        } catch Tokenizers.TokenizerError.missingChatTemplate {
+            throw MLXLMCommon.TokenizerError.missingChatTemplate
+        }
+    }
+}
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
@@ -332,20 +383,31 @@ struct MLXServer: AsyncParsableCommand {
         }()
         let tracker = ProgressTracker(modelId: resolvedModelId)
         
+        let cacheRoot = URL.applicationSupportDirectory
+            .appendingPathComponent("MLX", isDirectory: true)
+            .appendingPathComponent("HuggingFace", isDirectory: true)
         if isVision {
             print("[SwiftLM] Loading VLM (vision-language model)...")
+            let downloader = HubDownloader(hub: HubApi(downloadBase: cacheRoot))
             container = try await VLMModelFactory.shared.loadContainer(
+                from: downloader,
+                using: TransformersTokenizerLoader(),
                 configuration: modelConfig
             ) { progress in
                 tracker.printProgress(progress)
             }
         } else {
+            let downloader = HubDownloader(hub: HubApi(downloadBase: cacheRoot))
             container = try await LLMModelFactory.shared.loadContainer(
+                from: downloader,
+                using: TransformersTokenizerLoader(),
                 configuration: modelConfig
             ) { progress in
                 tracker.printProgress(progress)
             }
         }
+
+        print("[SwiftLM] Loaded model configuration. Inferred tool call format: \(String(describing: await container.configuration.toolCallFormat))")
 
         // ── Apply GPU/CPU layer partitioning ──
         if let gpuCount = requestedGPULayers {
@@ -786,9 +848,18 @@ actor PromptCache {
     private var misses: Int = 0
 
     /// Save the full prompt token sequence and its KV state.
+    /// IMPORTANT: We must eval() the state arrays immediately. The state getter may
+    /// produce lazy computation graphs (e.g. TurboKV decode → reshape → concatenate).
+    /// If not materialized now, those lazy references point to the live cache tensors
+    /// which get overwritten by subsequent requests, causing stale data / SIGTRAP on restore.
     func save(tokens: [Int], cache: [KVCache]) {
         let states = cache.map { $0.state }
         let metaStates = cache.map { $0.metaState }
+        // Materialize all lazy MLX arrays so they survive cache mutations
+        let allArrays = states.flatMap { $0 }
+        if !allArrays.isEmpty {
+            eval(allArrays)
+        }
         cached = CachedState(tokens: tokens, states: states, metaStates: metaStates)
     }
 
@@ -810,14 +881,30 @@ actor PromptCache {
             misses += 1
             return nil
         }
-        // Restore full cached KV state into each layer
+        // Pre-flight safety check: compute the minimum sequence length across
+        // all cached layers. Sliding-window layers (RotatingKVCache) store far
+        // fewer tokens than the full prompt (e.g. 1440 vs 5537). If the trim
+        // would zero-out any layer, bail BEFORE touching the live cache.
+        let excess = cached.tokens.count - matchLen
+        if excess > 0 {
+            // The state getter stores keys as the first element: [B, H, T, D]
+            // dim(2) = T = the number of cached tokens for that layer.
+            let minCachedSeqLen = cached.states.map { arrays -> Int in
+                guard let firstArray = arrays.first else { return 0 }
+                return firstArray.dim(2)  // T dimension
+            }.min() ?? 0
+            if excess >= minCachedSeqLen {
+                // Trim would empty or corrupt at least one layer → treat as miss
+                misses += 1
+                return nil
+            }
+        }
+        // Safe to restore: trim won't corrupt any layer
         for i in 0..<min(cache.count, cached.states.count) {
             var layer = cache[i]
             layer.state = cached.states[i]
             layer.metaState = cached.metaStates[i]
         }
-        // Trim excess if we only matched a partial prefix
-        let excess = cached.tokens.count - matchLen
         if excess > 0 {
             for layer in cache { layer.trim(excess) }
         }
@@ -885,11 +972,26 @@ func handleChatCompletion(
         let textContent = msg.textContent
         let images = msg.extractImages()
         switch msg.role {
-        case "system":
+        case "system", "developer":
             chatMessages.append(.system(textContent, images: images))
             systemPromptText += textContent
         case "assistant":
-            chatMessages.append(.assistant(textContent, images: images))
+            var formattedToolCalls: [[String: any Sendable]]? = nil
+            if let tc = msg.tool_calls, !tc.isEmpty {
+                formattedToolCalls = tc.map { call in
+                    [
+                        "id": call.id,
+                        "type": call.type,
+                        "function": [
+                            "name": call.function.name,
+                            "arguments": call.function.arguments
+                        ] as [String: any Sendable]
+                    ] as [String: any Sendable]
+                }
+            }
+            chatMessages.append(.assistant(textContent, images: images, toolCalls: formattedToolCalls))
+        case "tool":
+            chatMessages.append(.tool(textContent, toolCallId: msg.tool_call_id))
         default:
             chatMessages.append(.user(textContent, images: images))
         }
@@ -897,8 +999,12 @@ func handleChatCompletion(
 
     // ── JSON mode: inject system prompt for JSON output ──
     if jsonMode {
-        let jsonSystemMsg = Chat.Message.system("You must respond with valid JSON only. No markdown code fences, no explanation text, no preamble. Output raw JSON.")
-        chatMessages.insert(jsonSystemMsg, at: 0)
+        let jsonStr = "You must respond with valid JSON only. No markdown code fences, no explanation text, no preamble. Output raw JSON."
+        if !chatMessages.isEmpty && chatMessages[0].role == .system {
+            chatMessages[0].content += "\n\n" + jsonStr
+        } else {
+            chatMessages.insert(.system(jsonStr), at: 0)
+        }
         systemPromptText = "JSON_MODE:" + systemPromptText
     }
 
@@ -943,7 +1049,7 @@ func handleChatCompletion(
     let prefillStart = Date()
 
     // ── Cache-aware generation ──
-    let stream: AsyncStream<Generation> = try await container.perform { context in
+    let (stream, onPrefillDone) = try await container.perform { context -> (AsyncStream<Generation>, (() async -> Void)?) in
         let cache = context.model.newCache(parameters: params)
 
         // ── TurboQuant: enable 3-bit KV compression on every KVCacheSimple layer ──
@@ -958,27 +1064,36 @@ func handleChatCompletion(
         }
 
         // Try to restore via token-by-token prefix match (llama-server style)
+        var stream: AsyncStream<Generation>
         if let cachedCount = await promptCache.restore(newTokens: promptTokens, into: cache) {
             // Cache hit: KV state is pre-populated up to cachedCount tokens.
             // Only compute the remaining (new) tokens.
-            let remainingTokens = lmInput.text.tokens[cachedCount...]
+            var startIndex = cachedCount
+            if startIndex >= lmInput.text.tokens.count {
+                // Full match: all tokens are cached. We still need to feed at least
+                // the last token so the model can produce next-token logits.
+                startIndex = lmInput.text.tokens.count - 1
+                // Trim the KV cache back by 1 to avoid double-counting the replayed token.
+                for layer in cache { layer.trim(1) }
+            }
+            let remainingTokens = lmInput.text.tokens[startIndex...]
             let trimmedInput = LMInput(tokens: remainingTokens)
-            return try MLXLMCommon.generate(
+            stream = try MLXLMCommon.generate(
                 input: trimmedInput, cache: cache, parameters: params, context: context
             )
         } else {
             // Cache miss: process the full prompt.
-            let stream = try MLXLMCommon.generate(
+            stream = try MLXLMCommon.generate(
                 input: lmInput, cache: cache, parameters: params, context: context
             )
-            // Save full prompt tokens + KV state so the next request can prefix-match
-            // any shared prefix (system prompt, conversation history, long documents, etc.)
-            Task {
-                try? await Task.sleep(for: .milliseconds(100))
-                await promptCache.save(tokens: promptTokens, cache: cache)
-            }
-            return stream
         }
+        
+        // Return a closure that will save the cache state synchronously AFTER
+        // the generator stream has evaluated the prefill (on its very first token).
+        let onPrefillDone: (() async -> Void)? = {
+            await promptCache.save(tokens: promptTokens, cache: cache)
+        }
+        return (stream, onPrefillDone)
     }
 
     let modelId = config.modelId
@@ -988,14 +1103,14 @@ func handleChatCompletion(
             stream: stream, modelId: modelId, stopSequences: stopSequences,
             includeUsage: includeUsage, promptTokenCount: promptTokenCount,
             enableThinking: enableThinking, jsonMode: jsonMode, semaphore: semaphore,
-            stats: stats, genStart: genStart, prefillStart: prefillStart
+            stats: stats, genStart: genStart, prefillStart: prefillStart, onPrefillDone: onPrefillDone
         )
     } else {
         return try await handleChatNonStreaming(
             stream: stream, modelId: modelId, stopSequences: stopSequences,
             promptTokenCount: promptTokenCount, enableThinking: enableThinking,
             jsonMode: jsonMode, semaphore: semaphore,
-            stats: stats, genStart: genStart, prefillStart: prefillStart
+            stats: stats, genStart: genStart, prefillStart: prefillStart, onPrefillDone: onPrefillDone
         )
     }
 }
@@ -1090,7 +1205,8 @@ func handleChatStreaming(
     semaphore: AsyncSemaphore,
     stats: ServerStats,
     genStart: Date,
-    prefillStart: Date
+    prefillStart: Date,
+    onPrefillDone: (() async -> Void)? = nil
 ) -> Response {
     let (sseStream, cont) = AsyncStream<String>.makeStream()
 
@@ -1145,6 +1261,7 @@ func handleChatStreaming(
                     let prefillTokPerSec = prefillDur > 0 ? Double(promptTokenCount) / prefillDur : 0
                     print("srv  slot update: id 0 | prefill done | n_tokens=\(promptTokenCount), t=\(String(format: "%.2f", prefillDur))s, \(String(format: "%.1f", prefillTokPerSec))t/s")
                     print("srv  generate: id 0 | ", terminator: "")
+                    if let onPrefillDone { await onPrefillDone() }
                     firstToken = false
                 }
                 print(text, terminator: "")
@@ -1260,7 +1377,8 @@ func handleChatNonStreaming(
     semaphore: AsyncSemaphore,
     stats: ServerStats,
     genStart: Date,
-    prefillStart: Date
+    prefillStart: Date,
+    onPrefillDone: (() async -> Void)? = nil
 ) async throws -> Response {
     var fullText = ""
     var completionTokenCount = 0
@@ -1283,6 +1401,7 @@ func handleChatNonStreaming(
                 let prefillTokPerSec = prefillDur > 0 ? Double(promptTokenCount) / prefillDur : 0
                 print("srv  slot update: id 0 | prefill done | n_tokens=\(promptTokenCount), t=\(String(format: "%.2f", prefillDur))s, \(String(format: "%.1f", prefillTokPerSec))t/s")
                 print("srv  generate: id 0 | ", terminator: "")
+                if let onPrefillDone { await onPrefillDone() }
                 firstToken = false
             }
             print(text, terminator: "")
@@ -1843,6 +1962,8 @@ struct ChatCompletionRequest: Decodable {
     struct Message: Decodable {
         let role: String
         let content: MessageContent?
+        let tool_calls: [ToolCallResponse]?
+        let tool_call_id: String?
 
         /// Extract plain text from content (handles both string and multipart)
         var textContent: String {
@@ -1890,11 +2011,11 @@ struct ChatCompletionRequest: Decodable {
         case string(String)
         case parts([ContentPart])
 
-        init(from decoder: Decoder) throws {
-            let container = try decoder.singleValueContainer()
-            if let str = try? container.decode(String.self) {
+        init(from decoder: Swift.Decoder) throws {
+            let svc = try decoder.singleValueContainer()
+            if let str = try? svc.decode(String.self) {
                 self = .string(str)
-            } else if let parts = try? container.decode([ContentPart].self) {
+            } else if let parts = try? svc.decode([ContentPart].self) {
                 self = .parts(parts)
             } else {
                 self = .string("")
@@ -2023,13 +2144,13 @@ struct AssistantMessage: Encodable {
     }
 }
 
-struct ToolCallResponse: Encodable {
+struct ToolCallResponse: Codable {
     let id: String
     let type: String
     let function: ToolCallFunction
 }
 
-struct ToolCallFunction: Encodable {
+struct ToolCallFunction: Codable {
     let name: String
     let arguments: String
 }
@@ -2054,22 +2175,34 @@ struct TextChoice: Encodable {
     }
 }
 
-struct AnyCodable: Decodable, Sendable {
+// AnyCodable: a Sendable-compatible type-erased JSON value.
+// `value` stores only Sendable-compatible Foundation types: Bool, Int, Double,
+// String, NSNull, [AnyCodable.SendableValue], [String: AnyCodable.SendableValue]
+// AnyCodable: a type-erased JSON value that bridges to Foundation types.
+// Marked @unchecked Sendable: all stored types (Bool/Int/Double/String/NSNull/
+// recursive AnyCodable) are in fact Sendable; `Any` is used for ergonomic storage.
+// AnyCodable: type-erased Decodable wrapper over JSON scalars/arrays/objects.
+// `value` holds Sendable-safe Foundation types (Bool/Int/Double/String/NSNull + collections).
+struct AnyCodable: @unchecked Sendable {
     let value: Any
-    init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        if c.decodeNil() { value = NSNull() }
-        else if let b = try? c.decode(Bool.self) { value = b }
-        else if let i = try? c.decode(Int.self) { value = i }
-        else if let d = try? c.decode(Double.self) { value = d }
-        else if let s = try? c.decode(String.self) { value = s }
-        else if let a = try? c.decode([AnyCodable].self) { value = a.map { $0.value } }
-        else if let d = try? c.decode([String: AnyCodable].self) { value = d.mapValues { $0.value } }
-        else { value = NSNull() }
-    }
+
     static func toSendable(_ dict: [String: AnyCodable]?) -> [String: any Sendable]? {
         guard let dict else { return nil }
         return dict.mapValues { $0.value as! any Sendable }
+    }
+}
+
+extension AnyCodable: Decodable {
+    init(from decoder: Swift.Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if (try? c.decodeNil()) == true { value = NSNull(); return }
+        if let b = try? c.decode(Bool.self)   { value = b; return }
+        if let i = try? c.decode(Int.self)    { value = i; return }
+        if let d = try? c.decode(Double.self) { value = d; return }
+        if let s = try? c.decode(String.self) { value = s; return }
+        if let a = try? c.decode([AnyCodable].self) { value = a.map { $0.value }; return }
+        if let o = try? c.decode([String: AnyCodable].self) { value = o.mapValues { $0.value }; return }
+        value = NSNull()
     }
 }
 

@@ -33,10 +33,7 @@ let package = Package(
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-            path: "Sources/SwiftLM",
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
-            ]
+            path: "Sources/SwiftLM"
         ),
         // ── Shared inference library for SwiftLM Chat (iOS + macOS) ──
         .target(
