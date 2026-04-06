@@ -13,7 +13,15 @@ on:
       - main
     paths:
       - '**/*.swift'
+      - '**/*.c'
+      - '**/*.cpp'
+      - '**/*.h'
+      - '**/*.hpp'
+      - '**/*.m'
+      - '**/*.mm'
+      - '**/*.metal'
       - 'Package.swift'
+      - 'Package.resolved'
       - '.github/workflows/release.yml'
 
 concurrency:
