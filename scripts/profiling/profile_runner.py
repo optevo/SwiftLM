@@ -183,6 +183,7 @@ def main():
         server_proc.wait(timeout=20)
         time.sleep(3)  # Let OS reclaim memory before next config
         
+    # ── Write markdown report ──
     with open(args.out, "w") as f:
         f.write(f"### `{args.model}` — Context & Memory Profile\n\n")
         f.write(f"Context depths tested: {args.contexts}\n\n")
@@ -195,6 +196,148 @@ def main():
         f.write(f"> **GPU Memory Allocated**: Total memory requested by the GPU — includes data swapped to SSD. This shows the TRUE memory demand and reveals TurboQuant compression benefits even when Active RAM is saturated.\n")
             
     print(f"\nDone. Matrix saved to {args.out}")
+    
+    # ── Console visualization ──
+    if results:
+        print_visualization(results, args.model, baseline_alloc)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Console Visualization
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ANSI color codes
+class C:
+    RESET   = "\033[0m"
+    BOLD    = "\033[1m"
+    DIM     = "\033[2m"
+    # Foreground
+    RED     = "\033[31m"
+    GREEN   = "\033[32m"
+    YELLOW  = "\033[33m"
+    BLUE    = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN    = "\033[36m"
+    WHITE   = "\033[37m"
+    # Background
+    BG_BLUE = "\033[44m"
+    BG_MAG  = "\033[45m"
+
+CONFIG_COLORS = {
+    "Dense/Vanilla":    C.BLUE,
+    "SSD Stream":       C.CYAN,
+    "TurboQuant":       C.MAGENTA,
+    "SSD + TurboQuant": C.GREEN,
+}
+
+def bar(value, max_val, width=30, fill="█", empty="░", color=""):
+    if max_val <= 0:
+        filled = 0
+    else:
+        filled = int(round(value / max_val * width))
+    filled = min(filled, width)
+    return f"{color}{fill * filled}{C.DIM}{empty * (width - filled)}{C.RESET}"
+
+def print_visualization(results, model_name, baseline_alloc):
+    W = 72  # box width
+
+    print()
+    print(f"{C.BOLD}{C.CYAN}{'═' * W}{C.RESET}")
+    print(f"{C.BOLD}{C.CYAN}{'  BENCHMARK RESULTS':^{W}}{C.RESET}")
+    print(f"{C.BOLD}{C.CYAN}{'═' * W}{C.RESET}")
+    print(f"{C.DIM}  Model: {model_name}  |  Baseline GPU: {baseline_alloc:.1f} GB{C.RESET}")
+    print(f"{C.CYAN}{'─' * W}{C.RESET}")
+
+    # Group results by context size
+    ctx_sizes = sorted(set(r["context"] for r in results))
+
+    # ── 1) Generation Speed (TPS) ──
+    print(f"\n{C.BOLD}  ⚡ Generation Speed (tokens/sec) — higher is better{C.RESET}")
+    print(f"{C.DIM}  {'─' * (W - 4)}{C.RESET}")
+    
+    all_tps = [float(r["tps"]) for r in results if r["tps"] != "N/A"]
+    max_tps = max(all_tps) if all_tps else 1
+
+    for ctx in ctx_sizes:
+        ctx_results = [r for r in results if r["context"] == ctx]
+        ctx_label = f"{ctx:,} tokens"
+        print(f"\n  {C.BOLD}{C.WHITE}{ctx_label}{C.RESET}")
+        for r in ctx_results:
+            tps_val = float(r["tps"])
+            color = CONFIG_COLORS.get(r["config"], "")
+            label = f"    {r['config']:<20}"
+            b = bar(tps_val, max_tps, width=28, color=color)
+            val_str = f"{C.BOLD}{tps_val:>6.1f}{C.RESET} tok/s"
+            # Highlight the best TPS per context group
+            best_in_ctx = max(float(x["tps"]) for x in ctx_results)
+            crown = f" {C.YELLOW}★{C.RESET}" if tps_val == best_in_ctx and len(ctx_results) > 1 else ""
+            print(f"{label} {b} {val_str}{crown}")
+
+    # ── 2) Time to First Token (TTFT) ──
+    print(f"\n{C.BOLD}  ⏱  Time to First Token (seconds) — lower is better{C.RESET}")
+    print(f"{C.DIM}  {'─' * (W - 4)}{C.RESET}")
+    
+    all_ttft = [float(r["ttft"]) for r in results if r["ttft"] != "N/A"]
+    max_ttft = max(all_ttft) if all_ttft else 1
+
+    for ctx in ctx_sizes:
+        ctx_results = [r for r in results if r["context"] == ctx]
+        ctx_label = f"{ctx:,} tokens"
+        print(f"\n  {C.BOLD}{C.WHITE}{ctx_label}{C.RESET}")
+        for r in ctx_results:
+            ttft_val = float(r["ttft"])
+            color = CONFIG_COLORS.get(r["config"], "")
+            label = f"    {r['config']:<20}"
+            b = bar(ttft_val, max_ttft, width=28, color=color)
+            val_str = f"{C.BOLD}{ttft_val:>7.2f}{C.RESET}s"
+            best_in_ctx = min(float(x["ttft"]) for x in ctx_results)
+            crown = f" {C.YELLOW}★{C.RESET}" if ttft_val == best_in_ctx and len(ctx_results) > 1 else ""
+            print(f"{label} {b} {val_str}{crown}")
+
+    # ── 3) GPU Memory Demand ──
+    print(f"\n{C.BOLD}  💾 GPU Memory Allocated (GB) — lower is better{C.RESET}")
+    print(f"{C.DIM}  {'─' * (W - 4)}{C.RESET}")
+    
+    all_gpu = [float(r["gpu_alloc"]) for r in results if r["gpu_alloc"] != "N/A"]
+    max_gpu = max(all_gpu) if all_gpu else 1
+
+    for ctx in ctx_sizes:
+        ctx_results = [r for r in results if r["context"] == ctx]
+        ctx_label = f"{ctx:,} tokens"
+        print(f"\n  {C.BOLD}{C.WHITE}{ctx_label}{C.RESET}")
+        for r in ctx_results:
+            gpu_val = float(r["gpu_alloc"])
+            color = CONFIG_COLORS.get(r["config"], "")
+            label = f"    {r['config']:<20}"
+            b = bar(gpu_val, max_gpu, width=28, color=color)
+            val_str = f"{C.BOLD}{gpu_val:>6.1f}{C.RESET} GB"
+            best_in_ctx = min(float(x["gpu_alloc"]) for x in ctx_results)
+            crown = f" {C.YELLOW}★{C.RESET}" if gpu_val == best_in_ctx and len(ctx_results) > 1 else ""
+            print(f"{label} {b} {val_str}{crown}")
+
+    # ── 4) Summary scoreboard ──
+    print(f"\n{C.CYAN}{'─' * W}{C.RESET}")
+    print(f"{C.BOLD}  🏆 Configuration Ranking (by avg TPS across all contexts){C.RESET}")
+    print(f"{C.DIM}  {'─' * (W - 4)}{C.RESET}")
+
+    config_avg = {}
+    for cfg_name in set(r["config"] for r in results):
+        tps_vals = [float(r["tps"]) for r in results if r["config"] == cfg_name]
+        config_avg[cfg_name] = sum(tps_vals) / len(tps_vals) if tps_vals else 0
+
+    ranked = sorted(config_avg.items(), key=lambda x: x[1], reverse=True)
+    medals = ["🥇", "🥈", "🥉", "  "]
+    
+    for i, (cfg_name, avg_tps) in enumerate(ranked):
+        medal = medals[min(i, 3)]
+        color = CONFIG_COLORS.get(cfg_name, "")
+        avg_gpu = sum(float(r["gpu_alloc"]) for r in results if r["config"] == cfg_name) / max(1, len([r for r in results if r["config"] == cfg_name]))
+        print(f"  {medal} {color}{C.BOLD}{cfg_name:<22}{C.RESET}  avg {avg_tps:>5.1f} tok/s  |  avg {avg_gpu:>5.1f} GB GPU")
+
+    print(f"\n{C.CYAN}{'═' * W}{C.RESET}")
+    print()
+
 
 if __name__ == "__main__":
     main()
+
