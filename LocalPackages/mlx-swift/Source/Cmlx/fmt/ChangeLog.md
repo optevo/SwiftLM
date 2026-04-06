@@ -1433,7 +1433,7 @@
     #include <map>
 
     int main() {
-      fmt::print("{}", std::map<std::string, int>{{"answer", 42}});
+      fmt::print("{}", std::map<std::string, int>{% raw %}{{"answer", 42}}{% endraw %});
     }
     ```
 

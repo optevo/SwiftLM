@@ -135,6 +135,7 @@ def main():
         
         model_path = f"/Users/simba/.aegis-ai/models/mlx_models/mlx-community/{args.model}"
         log_path = "./tmp/profile_server.log"
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
         cmd = [SWIFTLM_PATH, "--model", model_path] + config["flags"]
         
         with open(log_path, "w") as root_log:
