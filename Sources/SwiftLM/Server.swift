@@ -1090,8 +1090,26 @@ func handleChatCompletion(
         
         // Return a closure that will save the cache state synchronously AFTER
         // the generator stream has evaluated the prefill (on its very first token).
+        //
+        // ⚠️ TurboQuant guard: when TurboQuant has compressed data, cache.state
+        // decodes ALL polar buffers back to full fp16 to create a restorable snapshot.
+        // At 100K context this creates a ~37 GB allocation that completely negates
+        // the compression savings (52 GB → should be ~20 GB).
+        // Skip prompt cache save when any layer has active TurboQuant compression.
+        // Short contexts (< turboMinActivationTokens) are unaffected — TurboQuant
+        // hasn't compressed anything yet so the state getter is a zero-copy view.
+        let turboHasCompressed = cache.contains { layer in
+            if let simple = layer as? KVCacheSimple {
+                return simple.turboQuantEnabled && simple.compressedOffset > 0
+            }
+            return false
+        }
         let onPrefillDone: (() async -> Void)? = {
-            await promptCache.save(tokens: promptTokens, cache: cache)
+            if turboHasCompressed {
+                print("[SwiftLM] 🧠 Skipping prompt cache save — TurboQuant has compressed \(cache.compactMap { ($0 as? KVCacheSimple)?.compressedOffset }.max() ?? 0) tokens. Saving would decode ~37 GB back to fp16.")
+            } else {
+                await promptCache.save(tokens: promptTokens, cache: cache)
+            }
         }
         return (stream, onPrefillDone)
     }
@@ -1259,7 +1277,8 @@ func handleChatStreaming(
                     await prefillState.finish()
                     let prefillDur = Date().timeIntervalSince(prefillStart)
                     let prefillTokPerSec = prefillDur > 0 ? Double(promptTokenCount) / prefillDur : 0
-                    print("srv  slot update: id 0 | prefill done | n_tokens=\(promptTokenCount), t=\(String(format: "%.2f", prefillDur))s, \(String(format: "%.1f", prefillTokPerSec))t/s")
+                    let memSnap = MemoryUtils.snapshot()
+                    print("srv  slot update: id 0 | prefill done | n_tokens=\(promptTokenCount), t=\(String(format: "%.2f", prefillDur))s, \(String(format: "%.1f", prefillTokPerSec))t/s | OS_RAM=\(String(format: "%.1f", memSnap.os))GB | MEM_DEMAND=\(String(format: "%.1f", memSnap.demand))GB | GPU_MEM=\(String(format: "%.1f", memSnap.gpu))GB")
                     print("srv  generate: id 0 | ", terminator: "")
                     if let onPrefillDone { await onPrefillDone() }
                     firstToken = false
@@ -1329,6 +1348,8 @@ func handleChatStreaming(
                     cont.finish()
                     // llama-server style: print newline then full response JSON
                     print("")  // end the real-time token stream line
+                    let postMemSnap = MemoryUtils.snapshot()
+                    print("srv  slot done: id 0 | gen_tokens=\(completionTokenCount) | OS_RAM=\(String(format: "%.1f", postMemSnap.os))GB | MEM_DEMAND=\(String(format: "%.1f", postMemSnap.demand))GB | GPU_MEM=\(String(format: "%.1f", postMemSnap.gpu))GB")
                     let dur = Date().timeIntervalSince(genStart)
                     let tokPerSec = dur > 0 ? Double(completionTokenCount) / dur : 0
                     let logContent: Any = hasToolCalls ? NSNull() : fullText
@@ -1399,7 +1420,8 @@ func handleChatNonStreaming(
             if firstToken {
                 let prefillDur = Date().timeIntervalSince(prefillStart)
                 let prefillTokPerSec = prefillDur > 0 ? Double(promptTokenCount) / prefillDur : 0
-                print("srv  slot update: id 0 | prefill done | n_tokens=\(promptTokenCount), t=\(String(format: "%.2f", prefillDur))s, \(String(format: "%.1f", prefillTokPerSec))t/s")
+                let memSnap = MemoryUtils.snapshot()
+                print("srv  slot update: id 0 | prefill done | n_tokens=\(promptTokenCount), t=\(String(format: "%.2f", prefillDur))s, \(String(format: "%.1f", prefillTokPerSec))t/s | OS_RAM=\(String(format: "%.1f", memSnap.os))GB | MEM_DEMAND=\(String(format: "%.1f", memSnap.demand))GB | GPU_MEM=\(String(format: "%.1f", memSnap.gpu))GB")
                 print("srv  generate: id 0 | ", terminator: "")
                 if let onPrefillDone { await onPrefillDone() }
                 firstToken = false
@@ -1419,6 +1441,8 @@ func handleChatNonStreaming(
         }
     }
     print("")  // end the real-time token stream line
+    let postMemSnap = MemoryUtils.snapshot()
+    print("srv  slot done: id 0 | gen_tokens=\(completionTokenCount) | OS_RAM=\(String(format: "%.1f", postMemSnap.os))GB | MEM_DEMAND=\(String(format: "%.1f", postMemSnap.demand))GB | GPU_MEM=\(String(format: "%.1f", postMemSnap.gpu))GB")
     let duration = Date().timeIntervalSince(genStart)
     await stats.requestFinished(tokens: completionTokenCount, duration: duration)
     await semaphore.signal()

@@ -137,3 +137,63 @@ You maintain a strict budget of RAM (e.g., 2 GB for active experts). The experts
 #### Summary 
 What you are poking at is exactly the future of local LLMs. Models are getting too big for VRAM, but SSDs are getting fast enough to bridge the gap if the model architecture cooperates. By changing the training objective to favor temporal blocks and expert knockout, you are effectively "hardware-aware" training the model to be friendly to the SSD PCIe lane.
 It completely shifts the bottleneck from the hardware (bus speed) to the algorithm (routing predictability).
+
+---
+
+## 🔬 Phase 3: Extreme Context Profiling & The Prompt Cache Discovery (April 5, 2026)
+
+### 10. Building the Profiling Framework
+
+With Gemma 4-26B stable and generating, we needed to answer the real deployment question: *How does this model behave at extreme context lengths across different memory configurations?* We built `scripts/profiling/profile_runner.py` — an automated profiling framework that:
+- Iterates through 4 configurations: Dense/Vanilla, SSD Stream, TurboQuant, SSD+TurboQuant
+- Tests across 3 context depths: 512, 40K, and 100K tokens
+- Captures both **Active RAM** (OS physical footprint via `mach_task_basic_info`) and **GPU Memory Allocated** (Apple GPU driver allocation via `ioreg AGXAccelerator`)
+
+### 11. The `ioreg` Breakthrough
+
+The initial profiling used only `phys_footprint` — the OS physical memory metric. But at 100K context, both Dense/Vanilla (49.3 GB) and TurboQuant (49.3 GB) showed identical numbers. This made no sense — TurboQuant was clearly compressing the KV cache.
+
+The problem: `phys_footprint` is **capped by available physical RAM**. On a 64 GB machine, it tops out at ~49 GB regardless of actual demand. We needed to see the *total GPU allocation* including memory swapped to SSD.
+
+Following the same pattern used by the Aegis-AI `HardwareDetector`, we queried Apple's `AGXAccelerator` GPU driver via `ioreg` for the `"Alloc system memory"` counter. This metric **CAN exceed physical RAM** — revealing the true memory demand:
+
+| Configuration | Active RAM (capped) | GPU Alloc (true demand) |
+|---|---|---|
+| Dense/Vanilla @ 40K | 49.4 GB | **52.6 GB** |
+| TurboQuant @ 40K | 32.4 GB | **35.0 GB** |
+
+The 52.6 GB vs 35.0 GB difference was invisible in the OS metric but clearly visible via `ioreg`.
+
+### 12. 🐛 The Prompt Cache Bug
+
+At 100K context, even with the `ioreg` metric, TurboQuant (52.5 GB) and Dense/Vanilla (52.1 GB) were nearly identical. Tracing through the code revealed the root cause:
+
+1. During prefill, the full 100K fp16 KV cache is built (~37 GB)
+2. After the first generation token, TurboQuant compresses it to ~3 GB of polar buffers ✅
+3. But then `onPrefillDone` fires → the prompt cache calls `cache.state`
+4. The `state` getter **decodes ALL compressed polar buffers back to full fp16** to create a restorable snapshot
+5. The `eval()` call materializes this decoded copy — a fresh **~37 GB allocation**
+6. Net result: compression savings completely negated
+
+The key insight: for Dense/Vanilla, `cache.state` returns **views** (zero-copy references) of existing buffers. For TurboQuant, it creates **new arrays** via `turboDecodeK/V` — an O(N) memory allocation the size of the entire context.
+
+### 13. 🔧 The Fix
+
+One targeted change: skip prompt cache save when TurboQuant has actively compressed data.
+
+**Results at 100K context (SSD + TurboQuant):**
+
+| Metric | Before Fix | After Fix |
+|---|---|---|
+| GPU Memory Allocated | 52.2 GB | **33.3 GB** (-36%) |
+| Active RAM | 49.1 GB | **29.6 GB** (-40%) |
+
+**29.6 GB Active RAM for a 26B model at 100K tokens.** This fits in a 32 GB Mac Studio — previously required 64 GB.
+
+### 📋 Files Changed
+- `Sources/SwiftLM/MemoryUtils.swift` — Added GPU active memory and total demand metrics
+- `Sources/SwiftLM/Server.swift` — OS_RAM + MEM_DEMAND + GPU_MEM logging at prefill and post-generation; prompt cache TurboQuant guard
+- `scripts/profiling/profile_runner.py` — Full profiling framework with `ioreg` GPU allocation tracking
+
+### 🎯 Key Lesson: Measure What Matters
+The OS `phys_footprint` metric is what Activity Monitor shows — but it lies by omission. It's capped by physical RAM and doesn't reveal how much memory the GPU driver has actually allocated (including SSD-swapped pages). For memory-constrained deployment, the `ioreg AGXAccelerator "Alloc system memory"` counter is the ground truth.

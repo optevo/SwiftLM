@@ -8,6 +8,39 @@ No Python runtime, no Global Interpreter Lock (GIL), no unnecessary memory copie
   <img src="docs/demo.gif" width="320" alt="SwiftLM Chat iOS demo" />
 </p>
 
+---
+
+## 📊 Performance: Gemma 4-26B on Apple Silicon
+
+Benchmark results for `gemma-4-26b-a4b-it-4bit` (26B MoE, 4-bit) on M5 Pro 64 GB. Full results and methodology at **[profiling_results.md](profiling_results.md)**.
+
+### Headline Numbers
+
+| Configuration | 512 ctx | 40K ctx | 100K ctx |
+|---|---|---|---|
+| **Dense/Vanilla** | 34 tok/s · 18.8 GB | 17 tok/s · 52.6 GB | 16 tok/s · 52.1 GB |
+| **SSD Stream** | 4.5 tok/s · **7.7 GB** | 4.2 tok/s · 52.1 GB | 3.5 tok/s · 52.1 GB |
+| **TurboQuant** | 34 tok/s · 18.6 GB | 7.0 tok/s · **35.0 GB** | 4.1 tok/s · **46.7 GB** |
+| **SSD + TurboQuant** | 4.7 tok/s · **7.7 GB** | 2.1 tok/s · **22.7 GB** | 1.4 tok/s · **33.3 GB** |
+
+> Values shown as `generation speed · GPU memory allocated`
+
+**Key takeaways:**
+- 🖥️ **8 GB Mac Mini**: SSD Stream runs a 26B model at **4.6 GB Active RAM**
+- 📄 **40K context on 24 GB MacBook Pro**: SSD + TurboQuant fits in **22.7 GB**
+- 📚 **100K context on 32 GB Mac Studio**: SSD + TurboQuant fits in **33.3 GB** — previously required 64 GB
+
+Run the benchmark on your device:
+```bash
+python3 scripts/profiling/profile_runner.py \
+  --model gemma-4-26b-a4b-it-4bit \
+  --contexts "512,40000,100000"
+```
+
+> We welcome PRs with results from other Apple Silicon devices! See [profiling_results.md](profiling_results.md#contributing-your-results) for details.
+
+---
+
 ## 🚀 Features
 
 - 🍎 **100% Native Apple Silicon**: Powered natively by Metal and Swift. 
@@ -47,16 +80,7 @@ Reference implementations: [`turboquant-mlx`](https://github.com/sharpner/turboq
 
 ---
 
-## 💻 Tested Hardware & Benchmarks
-
-SwiftLM is designed to leverage Apple Silicon Unified Memory limits to their absolute maximum. All first-party benchmarks are generated on an **Apple M5 Pro (64 GB Unified Memory)**.
-
-Since we have limited access to the full spectrum of Apple hardware, **we welcome Pull Requests with benchmark results** from other devices (especially base M1/M2/M3 chips and Mac Studios). 
-
-To run the extreme context benchmark suite on your device, execute:
-```bash
-bash tests/run_extreme_context.sh <model-id>
-```
+## 💻 Additional Benchmarks
 
 ### Prompt Cache & Sliding Window Regression Test
 To verify the stability of the prompt cache when interleaving long contexts with sliding window attention (e.g. Gemma 4/Mistral 3), run this extreme test sequence:
@@ -72,15 +96,6 @@ echo "=== Req 4 (Big Full Cache Hit) ===" && curl -sS --max-time 120 http://127.
 echo "=== ALL 4 PASSED ==="
 ```
 If you see `ALL 4 PASSED` without `SIGTRAP` or `curl: (52) Empty reply from server`, the memory bounds are stable.
-
-### Extreme Context Performance (100K Tokens)
-Tested on M5 Pro (64GB) handling a monolithic **100,000 token** system prompt with **TurboKV Acceleration** enabled.
-
-| Model | Configuration | Time To First Token (TTFT) | Peak GPU Memory (w/ TurboKV) |
-|---|---|---|---|
-| `gemma-4-e4b-it-8bit` | Dense (4B) | 60.92s | 11.83 GB |
-| `gemma-4-26b-a4b-it-4bit` | MoE (26B) | 66.99s | 16.86 GB |
-| `gemma-4-31b-it-4bit` | MoE (31B) | 533.37s | 29.23 GB |
 
 ### Throughput & Inference Memory Profile
 Tested by rendering exactly 20 tokens under standard conversational evaluation (`--prefill-size 512`) to capture precise Token Generation (TPS) and Apple Metal memory footprint limits:
@@ -217,6 +232,7 @@ curl http://localhost:5413/v1/chat/completions \
 | `--prefill-size`| `512`  | Prompt prefill chunk size (micro-batching for long contexts) |
 | `--gpu-layers` | `model_default`| Restrict the amount of layers allocated to GPU hardware |
 | `--stream-experts` | `false` | Enable experimental SSD streaming for MoE model expert matrices |
+| `--turbo-kv` | `false` | Enable TurboQuant 3-bit KV cache compression |
 
 ## 📦 Requirements
 
