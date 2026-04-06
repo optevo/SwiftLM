@@ -1,33 +1,85 @@
 #!/bin/bash
 set -e
 
-echo "=> Initializing submodules..."
+echo "=============================================="
+echo "    SwiftLM Build Script                      "
+echo "=============================================="
+
+# --- 1. Submodules ---
+echo ""
+echo "=> [1/4] Initializing submodules..."
 git submodule update --init --recursive
 
-echo "=> Building SwiftLM (release)..."
-swift build -c release
+# --- 2. Check for cmake ---
+echo ""
+echo "=> [2/4] Checking build dependencies..."
+if ! command -v cmake &> /dev/null; then
+    echo "cmake not found. Installing via Homebrew..."
+    if ! command -v brew &> /dev/null; then
+        echo "❌ Homebrew is required to install cmake."
+        echo "   Install Homebrew: https://brew.sh"
+        exit 1
+    fi
+    brew install cmake
+fi
+echo "   cmake: $(cmake --version | head -1)"
 
-# --- Copy the pre-built default.metallib next to the binary ---
-# NOTE: default.metallib is a PRE-BUILT artifact tracked in the mlx-swift
-# submodule via `git add -f`. It CANNOT be compiled locally because the MLX
-# Metal kernel sources (bf16_math.h) conflict with newer macOS Metal SDK
-# versions. The metallib must be version-matched to the mlx-swift C++ code
-# that was compiled into the SwiftLM binary. Do NOT substitute it with the
-# Python mlx-metal pip package — that causes GPU kernel ABI corruption.
+# --- 3. Build the Metal kernel library (mlx.metallib) from source ---
+echo ""
+echo "=> [3/4] Building Metal kernels (mlx.metallib)..."
 
-echo "=> Copying default.metallib..."
-METALLIB_SRC="LocalPackages/mlx-swift/Source/Cmlx/mlx/mlx/backend/metal/kernels/default.metallib"
-METALLIB_DEST=".build/arm64-apple-macosx/release/"
+MLX_SRC="LocalPackages/mlx-swift/Source/Cmlx/mlx"
+METALLIB_BUILD_DIR=".build/metallib_build"
+METALLIB_DEST=".build/arm64-apple-macosx/release"
 
-if [ -f "$METALLIB_SRC" ]; then
-    mkdir -p "$METALLIB_DEST"
-    cp "$METALLIB_SRC" "$METALLIB_DEST"
-    echo "✅ Copied default.metallib to $METALLIB_DEST"
+rm -rf "$METALLIB_BUILD_DIR"
+mkdir -p "$METALLIB_BUILD_DIR"
+
+pushd "$METALLIB_BUILD_DIR" > /dev/null
+
+cmake "../../$MLX_SRC" \
+    -DMLX_BUILD_TESTS=OFF \
+    -DMLX_BUILD_EXAMPLES=OFF \
+    -DMLX_BUILD_BENCHMARKS=OFF \
+    -DMLX_BUILD_PYTHON_BINDINGS=OFF \
+    -DMLX_METAL_JIT=OFF \
+    -DMLX_ENABLE_NAX=1 \
+    -DCMAKE_BUILD_TYPE=Release \
+    2>&1 | tail -5
+
+echo "   Compiling Metal shaders..."
+make mlx-metallib -j$(sysctl -n hw.ncpu) 2>&1 | tail -3
+
+popd > /dev/null
+
+# Copy the freshly built metallib next to the binary
+mkdir -p "$METALLIB_DEST"
+if [ -f "$METALLIB_BUILD_DIR/lib/mlx.metallib" ]; then
+    cp "$METALLIB_BUILD_DIR/lib/mlx.metallib" "$METALLIB_DEST/mlx.metallib"
+    echo "✅ Built and copied mlx.metallib to $METALLIB_DEST/"
+elif [ -f "$METALLIB_BUILD_DIR/mlx.metallib" ]; then
+    cp "$METALLIB_BUILD_DIR/mlx.metallib" "$METALLIB_DEST/mlx.metallib"
+    echo "✅ Built and copied mlx.metallib to $METALLIB_DEST/"
 else
-    echo "⚠️  default.metallib not found at $METALLIB_SRC"
-    echo "   This file must be tracked in git. Run:"
-    echo "     git add -f $METALLIB_SRC && git commit -m 'Track default.metallib'"
-    exit 1
+    # Search for it anywhere in the build dir
+    BUILT=$(find "$METALLIB_BUILD_DIR" -name "mlx.metallib" | head -1)
+    if [ -n "$BUILT" ]; then
+        cp "$BUILT" "$METALLIB_DEST/mlx.metallib"
+        echo "✅ Built and copied mlx.metallib to $METALLIB_DEST/"
+    else
+        echo "❌ Failed to build mlx.metallib. Check cmake output above."
+        exit 1
+    fi
 fi
 
-echo "=> Build complete!"
+# --- 4. Build SwiftLM ---
+echo ""
+echo "=> [4/4] Building SwiftLM (release)..."
+swift build -c release
+
+echo ""
+echo "=============================================="
+echo "✅ Build complete!"
+echo "   Binary:   .build/release/SwiftLM"
+echo "   Metallib: $METALLIB_DEST/mlx.metallib"
+echo "=============================================="
