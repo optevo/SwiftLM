@@ -99,3 +99,36 @@ The SSD streaming kernels introduce custom memory synchronization routines (`ssd
 3. If Apple's `moe_stream_op` native implementations match or exceed the latency speedups provided by your custom `ssd_streamer.mm`.
 
 If any of these conditions are met, simply rewrite `SharpAI/mlx-swift/.gitmodules` back to `https://github.com/ml-explore/mlx` and delete your Github forks!
+
+## 5. SharpAI Custom Patches Inventory (vs. Upstream ml-explore)
+
+As of **April 2026**, the following specific features exist ONLY in our custom forks. Knowing precisely *what* we added is the key to knowing exactly *when* we can revert to Apple's native upstream (`ml-explore`).
+
+### 🛠️ In `SharpAI/mlx` (C++ Engine)
+*Compared to `ml-explore/mlx:main`*
+1. `feat: custom ssd-streaming kernels and custom MLX I/O fast loaders`
+   - Added `moe_stream_op` primitives enabling SSD flash streaming (out-of-core execution).
+2. `fix(metal): align moe_stream_op add_temporary signature with latest apple upstream`
+   - Custom extensions needed maintaining against newer MLX memory-pool updates.
+3. `fix(metal): add default initialization loop for bound encoder contexts in async`
+   - Patched `device.cpp` so thread pool reassignments by Swift's async engine don't result in fatal runtime aborts due to missing context dictionaries.
+
+### 🛠️ In `SharpAI/mlx-c` (C-API Bridge)
+*Compared to `ml-explore/mlx-c:main`*
+1. `chore: rebase SharpAI custom ops onto latest Apple MLX-C upstream to fix fft/dequantize signatures`
+2. `fix(ops): align c wrappers with mlx 0.30.0+ upstream signatures for dequantize, qqmm, and fft`
+3. `fix(fft): restore Shape type for fft methods n parameter` & `fix(fft): remove invalid norm from fftshift calls`
+   - Resolves signature drift and struct mismatches linking the new C++ API modifications down to Swift C headers.
+
+### 🛠️ In `SharpAI/mlx-swift` (Swift Wrappers)
+*Compared to `ml-explore/mlx-swift:main`*
+1. `Restoration of missing MLX custom extensions including C-API and Swift bridge` & `Update custom C++ kernel patches for SSD Streaming`
+   - Recreated Swift integrations bridging into out-of-core functionality.
+2. `chore: isolate SharpAI custom MLX/MLX-C engines into dedicated GitHub forks`
+   - Submodule remotes internally pinned from `ml-explore` tracking links to `SharpAI` ecosystem forks.
+3. `fix(build): bump cxxLanguageStandard to .gnucxx20 for Apple MLX upstream compatibility`
+   - Custom `Package.swift` override explicitly permitting C++20 standard since upstream didn't upgrade constraints simultaneously.
+4. `fix(mlx): build steel_conv_3d C++ string for Cmlx target`
+   - Added missing header dependencies specifically isolated by recent upstream migrations.
+5. `fix(jit): update generated mlx c++ metal headers and fix fast.h signature to match fast.cpp`
+   - Recompiled Metal header string buffers internally inside `mlx-generated` ensuring `affine_qmm_t_splitk` and other functions are dynamically injected at runtime.
