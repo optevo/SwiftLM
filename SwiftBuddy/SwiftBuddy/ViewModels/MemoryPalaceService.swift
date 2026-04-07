@@ -226,4 +226,36 @@ final class MemoryPalaceService {
         let allTriples = try context.fetch(fetchDesc)
         return allTriples.filter { $0.subject.lowercased() == targetSubj }
     }
+    
+    // MARK: - Tier 6: Advanced Support
+    
+    func getWakeupContext(wingName: String) throws -> String {
+        guard let context = modelContext else { throw URLError(.badServerResponse) }
+        
+        // 1. Fetch Top 5 Triples for this specific wing's context
+        let tripleDesc = FetchDescriptor<KnowledgeGraphTriple>(sortBy: [SortDescriptor(\.dateObserved, order: .reverse)])
+        let recentTriples = Array((try context.fetch(tripleDesc)).prefix(5))
+        
+        let kgBlock = recentTriples.map { "[\($0.subject)] \($0.predicate) \($0.object)" }.joined(separator: "\n")
+        
+        // 2. Fetch last 3 entries from the "diary" room without NSException nesting
+        let wingDesc = FetchDescriptor<PalaceWing>(predicate: #Predicate { $0.name == wingName })
+        guard let wing = try context.fetch(wingDesc).first else { return "No context found." }
+        
+        let diaryRoom = wing.rooms.first(where: { $0.name == "diary" })
+        let memories = diaryRoom?.memories.sorted { $0.dateAdded > $1.dateAdded } ?? []
+        let diaryEntries = Array(memories.prefix(3).reversed())
+        
+        let diaryBlock = diaryEntries.map { "- \($0.text)" }.joined(separator: "\n")
+        
+        return """
+        --- L0/L1 WAKEUP CONTEXT ---
+        [Knowledge Graph]
+        \(kgBlock)
+        
+        [Recent Reflections]
+        \(diaryBlock)
+        ----------------------------
+        """
+    }
 }

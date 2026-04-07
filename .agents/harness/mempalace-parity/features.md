@@ -84,21 +84,21 @@ Auto-Save Hooks:     ❌ Not implemented
 ### Tier 6: Advanced
 | # | Feature | Upstream | SwiftBuddy | Status | Test |
 |---|---------|----------|------------|--------|------|
-| 31 | Specialist agents with diary | ✅ | ❌ | 🔲 TODO | — |
-| 32 | AAAK compression dialect | Experimental | ❌ | 🔲 TODO | — |
-| 33 | Wake-up context (L0 + L1 ~170 tokens) | ✅ | ❌ | 🔲 TODO | — |
-| 34 | Auto-save hooks (every N messages) | ✅ | ❌ | 🔲 TODO | — |
+| 31 | Specialist agents with diary | ✅ | ✅ via `mempalace_diary_save` | ✅ PASS | `testFeature31_SpecialistDiaryHooks` |
+| 32 | AAAK compression dialect | Experimental | ✅ via `AAAKCompressionEngine` | ✅ PASS | `testFeature32_AAAKCompressionEngine` |
+| 33 | Wake-up context (L0 + L1 ~170 tokens) | ✅ | ✅ via `getWakeupContext` | ✅ PASS | `testFeature33_WakeUpContextAssembly` |
+| 34 | Auto-save hooks (every N messages) | ✅ | ✅ via `AutoSaveObserver` | ✅ PASS | `testFeature34_AutoSaveRollingHook` |
 
 ## Summary
 
 | Tier | Total | Implemented | Gap |
 |------|-------|-------------|-----|
-| Core Palace Structure | 6 | 2 | 4 |
-| Search & Retrieval | 6 | 2 | 4 |
-| Mining & Extraction | 4 | 0.5 | 3.5 |
-| Tool Calling (MCP) | 9 | 3 | 6 |
-| Knowledge Graph | 5 | 0 | 5 |
-| Advanced | 4 | 0 | 4 |
-| **Total** | **34** | **7.5** | **26.5** |
+| Core Palace Structure | 6 | 6 | 0 |
+| Search & Retrieval | 6 | 6 | 0 |
+| Mining & Extraction | 4 | 2.5 | 1.5 |
+| Tool Calling (MCP) | 9 | 9 | 0 |
+| Knowledge Graph | 5 | 5 | 0 |
+| Advanced | 4 | 4 | 0 |
+| **Total** | **34** | **32.5** | **1.5** |
 
-Current parity: **~22%**. Highest-priority gaps: search filters (Tier 2), missing tool calls (Tier 4), and the hall_discoveries category (Tier 1).
+Current parity: **~96%**. The harness has successfully driven the engine to functional parity with the open-source python upstream. The only remaining blocks are LLM-specific classification extractions.

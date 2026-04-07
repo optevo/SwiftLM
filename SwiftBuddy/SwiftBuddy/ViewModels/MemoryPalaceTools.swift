@@ -135,6 +135,21 @@ public struct MemoryPalaceTools {
                         "required": ["entity"]
                     ]
                 ]
+            ],
+            [
+                "type": "function",
+                "function": [
+                    "name": "mempalace_diary_save",
+                    "description": "Save an internal agent reflection into the hardcoded 'diary' room of a specific wing.",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "wing": ["type": "string"],
+                            "reflection": ["type": "string"]
+                        ],
+                        "required": ["wing", "reflection"]
+                    ]
+                ]
             ]
         ]
     }
@@ -211,6 +226,12 @@ public struct MemoryPalaceTools {
             if triples.isEmpty { return "No knowledge properties found for entity: \(entity)" }
             let lines = triples.map { "- \($0.predicate): \($0.object)" }
             return "Entity: \(entity)\n" + lines.joined(separator: "\n")
+            
+        case "mempalace_diary_save":
+            guard let wing = arguments["wing"] as? String,
+                  let text = arguments["reflection"] as? String else { return "Error: Missing diary arguments" }
+            try MemoryPalaceService.shared.saveMemory(wingName: wing, roomName: "diary", text: text, type: "hall_events")
+            return "Saved reflection to diary."
             
         default:
             return "Unknown tool call: \(name)"
