@@ -23,9 +23,9 @@ jobs:
           path: .build
           # Key includes product name so any rename (e.g. mlx-server→SwiftLM)
           # automatically busts the cache and prevents stale PCH errors.
-          key: ${{ runner.os }}-spm-SwiftLM-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-SwiftLM-v2-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-SwiftLM-
+            ${{ runner.os }}-spm-SwiftLM-v2-
 
       - name: Resolve dependencies
         run: swift package resolve
