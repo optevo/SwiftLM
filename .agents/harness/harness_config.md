@@ -50,10 +50,13 @@
 │  8. Write run log to runs/                  │
 ├─────────────────────────────────────────────┤
 │  9. Loop back to step 1                     │
-│     → Until all features are ✅             │
+│     → ONLY STOP when ALL features are ✅    │
+│     → NEVER yield to the user mid-loop      │
 ├─────────────────────────────────────────────┤
-│ 10. Report completion                       │
+│ 10. Report final full completion            │
 └─────────────────────────────────────────────┘
+
+> **CRITICAL PROTOCOL RULE**: You must target a FULL implementation. Do not pause, stop, or ask the user if they are "ready to proceed" while features remaining in 🔲 TODO status. Automatically chain the execution loop until every single item is fully implemented and tested.
 ```
 
 ### Failure Recovery

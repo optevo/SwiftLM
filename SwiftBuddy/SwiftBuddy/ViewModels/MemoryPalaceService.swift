@@ -39,10 +39,24 @@ final class MemoryPalaceService {
     
     // MARK: - Palace Operations
     
-    func saveMemory(wingName: String, roomName: String, text: String, type: String = "Facts") throws {
+    @discardableResult
+    func saveMemory(wingName: String, roomName: String, text: String, type: String = "Facts") throws -> Bool {
         guard let context = modelContext else { throw URLError(.badServerResponse) }
+        guard let vector = generateEmbedding(for: text) else { return false }
         
-        // 1. Find or create Wing
+        // 1. Semantic Duplicate Guard
+        let fetchDesc = FetchDescriptor<MemoryEntry>()
+        let existingMemories = try context.fetch(fetchDesc).filter { $0.room?.name == roomName && $0.room?.wing?.name == wingName }
+        for mem in existingMemories {
+            if let emb = mem.embedding {
+                let similarity = cosineSimilarity(a: vector, b: emb)
+                if similarity > 0.95 {
+                    return false // Duplicate blocked
+                }
+            }
+        }
+        
+        // 2. Find or create Wing
         let fetchWing = FetchDescriptor<PalaceWing>(predicate: #Predicate { $0.name == wingName })
         let wing = (try? context.fetch(fetchWing).first) ?? {
             let w = PalaceWing(name: wingName)
@@ -50,7 +64,7 @@ final class MemoryPalaceService {
             return w
         }()
         
-        // 2. Find or create Room in Wing
+        // 3. Find or create Room in Wing
         let fetchRoom = FetchDescriptor<PalaceRoom>(predicate: #Predicate { $0.name == roomName && $0.wing?.name == wingName })
         let room = (try? context.fetch(fetchRoom).first) ?? {
             let r = PalaceRoom(name: roomName, wing: wing)
@@ -58,34 +72,54 @@ final class MemoryPalaceService {
             return r
         }()
         
-        // 3. Generate Embedding & Save Memory
-        let vector = generateEmbedding(for: text)
+        // 4. Save Memory
         let entry = MemoryEntry(text: text, hallType: type, embedding: vector, room: room)
         context.insert(entry)
         
         try context.save()
+        return true
     }
     
-    func searchMemories(query: String, wingName: String, topK: Int = 5) throws -> [MemoryEntry] {
+    func searchMemories(query: String, wingName: String, roomName: String? = nil, hallType: String? = nil, topK: Int = 5) throws -> [MemoryEntry] {
         guard let context = modelContext else { throw URLError(.badServerResponse) }
         guard let queryVector = generateEmbedding(for: query) else { return [] }
         
-        // Fetch all memories directly matching the wing
-        let fetchDesc = FetchDescriptor<MemoryEntry>(predicate: #Predicate { $0.room?.wing?.name == wingName })
-        let allMemories = try context.fetch(fetchDesc)
+        let fetchWing = FetchDescriptor<PalaceWing>(predicate: #Predicate { $0.name == wingName })
+        guard let wing = try context.fetch(fetchWing).first else { return [] }
         
-        // Score using cosine similarity
+        var allMemories = wing.rooms.flatMap { $0.memories }
+        if let r = roomName { allMemories = allMemories.filter { $0.room?.name == r } }
+        if let h = hallType { allMemories = allMemories.filter { $0.hallType == h } }
+        
+        return sortAndSliceMemories(allMemories, queryVector: queryVector, topK: topK)
+    }
+    
+    func searchAllMemories(query: String, topK: Int = 5) throws -> [MemoryEntry] {
+        guard let context = modelContext else { throw URLError(.badServerResponse) }
+        guard let queryVector = generateEmbedding(for: query) else { return [] }
+        
+        let fetchDesc = FetchDescriptor<MemoryEntry>()
+        let allMemories = try context.fetch(fetchDesc)
+        return sortAndSliceMemories(allMemories, queryVector: queryVector, topK: topK)
+    }
+    
+    private func sortAndSliceMemories(_ memories: [MemoryEntry], queryVector: [Double], topK: Int) -> [MemoryEntry] {
         var scored: [(entry: MemoryEntry, score: Double)] = []
-        for mem in allMemories {
+        for mem in memories {
             if let emb = mem.embedding {
                 let score = cosineSimilarity(a: queryVector, b: emb)
                 scored.append((mem, score))
             }
         }
-        
-        // Sort and return topK
         scored.sort { $0.score > $1.score }
         return scored.prefix(topK).map { $0.entry }
+    }
+    
+    func findTunnels(roomName: String) throws -> [String] {
+        guard let context = modelContext else { throw URLError(.badServerResponse) }
+        let fetchDesc = FetchDescriptor<PalaceRoom>(predicate: #Predicate { $0.name == roomName })
+        let rooms = try context.fetch(fetchDesc)
+        return rooms.compactMap { $0.wing?.name }
     }
     
     func listRooms(wingName: String) throws -> [String] {
@@ -93,5 +127,71 @@ final class MemoryPalaceService {
         let fetchWing = FetchDescriptor<PalaceWing>(predicate: #Predicate { $0.name == wingName })
         guard let wing = try context.fetch(fetchWing).first else { return [] }
         return wing.rooms.map { $0.name }
+    }
+    
+    // MARK: - Wing Management
+    
+    func listWings() throws -> [String] {
+        guard let context = modelContext else { throw URLError(.badServerResponse) }
+        let descriptor = FetchDescriptor<PalaceWing>(sortBy: [SortDescriptor(\.createdDate)])
+        let wings = try context.fetch(descriptor)
+        return wings.map { $0.name }
+    }
+    
+    func deleteWing(_ name: String) throws {
+        guard let context = modelContext else { throw URLError(.badServerResponse) }
+        let fetchWing = FetchDescriptor<PalaceWing>(predicate: #Predicate { $0.name == name })
+        if let wing = try context.fetch(fetchWing).first {
+            context.delete(wing)
+            try context.save()
+        }
+    }
+    
+    func deleteMemory(wingName: String, roomName: String?, textMatch: String) throws {
+        // Find closest match > 0.85 and delete it
+        let matches = try searchMemories(query: textMatch, wingName: wingName, roomName: roomName, topK: 1)
+        if let mem = matches.first, let context = modelContext {
+            context.delete(mem)
+            try context.save()
+        }
+    }
+    
+    // MARK: - Taxonomy & Status
+    
+    func getCloset(wingName: String, roomName: String) throws -> String {
+        guard let context = modelContext else { throw URLError(.badServerResponse) }
+        let fetchWing = FetchDescriptor<PalaceWing>(predicate: #Predicate { $0.name == wingName })
+        guard let wing = try context.fetch(fetchWing).first else { return "Closet is empty." }
+        
+        guard let room = wing.rooms.first(where: { $0.name == roomName }) else { return "Closet is empty." }
+        
+        let memories = room.memories.sorted { $0.dateAdded > $1.dateAdded }
+        if memories.isEmpty { return "Closet is empty." }
+        
+        let facts = memories.map { "[\($0.hallType)] \($0.text)" }.joined(separator: "\n")
+        return "Closet for \(wingName)/\(roomName):\n\(facts)"
+    }
+    
+    func getTaxonomy() throws -> String {
+        guard let context = modelContext else { throw URLError(.badServerResponse) }
+        let descriptor = FetchDescriptor<PalaceWing>(sortBy: [SortDescriptor(\.createdDate)])
+        let wings = try context.fetch(descriptor)
+        
+        var output = "Memory Palace Taxonomy:\n"
+        for w in wings {
+            output += "Wing: \(w.name) (\(w.rooms.count) rooms)\n"
+            for r in w.rooms {
+                output += "  - Room: \(r.name) (\(r.memories.count) memories)\n"
+            }
+        }
+        return output
+    }
+    
+    func getPalaceStatus() throws -> (wings: Int, rooms: Int, memories: Int) {
+        guard let context = modelContext else { throw URLError(.badServerResponse) }
+        let wCount = try context.fetchCount(FetchDescriptor<PalaceWing>())
+        let rCount = try context.fetchCount(FetchDescriptor<PalaceRoom>())
+        let mCount = try context.fetchCount(FetchDescriptor<MemoryEntry>())
+        return (wings: wCount, rooms: rCount, memories: mCount)
     }
 }

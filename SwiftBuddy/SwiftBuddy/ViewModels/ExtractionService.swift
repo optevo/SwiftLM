@@ -39,7 +39,7 @@ public final class ExtractionService: ObservableObject {
           "extractions": [
             {
               "room": "Topic Category (e.g., 'Career', 'Physics', 'Personal')",
-              "hall": "Category Type (must be either: 'hall_facts', 'hall_events', 'hall_preferences', 'hall_advice')",
+              "hall": "Category Type (must be either: 'hall_facts', 'hall_events', 'hall_discoveries', 'hall_preferences', 'hall_advice')",
               "fact": "The extracted fact written as a concise, timeless statement."
             }
           ]

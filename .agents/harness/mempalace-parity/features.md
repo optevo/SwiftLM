@@ -34,22 +34,22 @@ Auto-Save Hooks:     ❌ Not implemented
 ### Tier 1: Core Palace Structure
 | # | Feature | Upstream | SwiftBuddy | Status | Test |
 |---|---------|----------|------------|--------|------|
-| 1 | Wings (create, list, delete) | ✅ | Partial (create only) | 🔲 TODO | — |
+| 1 | Wings (create, list, delete) | ✅ | ✅ | ✅ PASS | `testFeature1_WingsCRUD` |
 | 2 | Rooms within wings | ✅ | ✅ | ✅ PASS | — |
-| 3 | Hall types (5 categories) | 5 halls | 4 halls (missing `hall_discoveries`) | 🔲 TODO | — |
+| 3 | Hall types (5 categories) | 5 halls | 5 halls | ✅ PASS | `testFeature3_HallDiscoveries` |
 | 4 | Verbatim raw storage (drawers) | ✅ | ✅ (as MemoryEntry.text) | ✅ PASS | — |
-| 5 | Closets (summaries pointing to drawers) | ✅ | ❌ No summary layer | 🔲 TODO | — |
-| 6 | Tunnels (cross-wing room linking) | ✅ | ❌ | 🔲 TODO | — |
+| 5 | Closets (summaries pointing to drawers) | ✅ | ✅ | ✅ PASS | `mempalace_get_closet` |
+| 6 | Tunnels (cross-wing room linking) | ✅ | ✅ | ✅ PASS | `testFeature6_Tunnels` |
 
 ### Tier 2: Search & Retrieval
 | # | Feature | Upstream | SwiftBuddy | Status | Test |
 |---|---------|----------|------------|--------|------|
 | 7 | Semantic vector search | ChromaDB | Apple NLEmbedding | ✅ PASS | — |
 | 8 | Search within wing | ✅ | ✅ | ✅ PASS | — |
-| 9 | Search within wing + room filter | ✅ | ❌ (wing-only filter) | 🔲 TODO | — |
-| 10 | Search within wing + hall filter | ✅ | ❌ | 🔲 TODO | — |
-| 11 | Cross-wing search (all wings) | ✅ | ❌ | 🔲 TODO | — |
-| 12 | Duplicate detection before save | ✅ (`check_duplicate`) | ❌ | 🔲 TODO | — |
+| 9 | Search within wing + room filter | ✅ | ✅ | ✅ PASS | `testFeature9_10_SearchFilters` |
+| 10 | Search within wing + hall filter | ✅ | ✅ | ✅ PASS | `testFeature9_10_SearchFilters` |
+| 11 | Cross-wing search (all wings) | ✅ | ✅ | ✅ PASS | `testFeature11_CrossWingSearch` |
+| 12 | Duplicate detection before save | ✅ (`check_duplicate`) | ✅ | ✅ PASS | `testFeature12_DuplicateDetection` |
 
 ### Tier 3: Mining & Extraction
 | # | Feature | Upstream | SwiftBuddy | Status | Test |
@@ -65,12 +65,12 @@ Auto-Save Hooks:     ❌ Not implemented
 | 17 | Save memory | `mempalace_add_drawer` | `mempalace_save_fact` | ✅ PASS | — |
 | 18 | Search memory | `mempalace_search` | `mempalace_search` | ✅ PASS | — |
 | 19 | List rooms | `mempalace_list_rooms` | `mempalace_list_rooms` | ✅ PASS | — |
-| 20 | List wings | `mempalace_list_wings` | ❌ | 🔲 TODO | — |
-| 21 | Get taxonomy | `mempalace_get_taxonomy` | ❌ | 🔲 TODO | — |
-| 22 | Delete drawer | `mempalace_delete_drawer` | ❌ | 🔲 TODO | — |
+| 20 | List wings | `mempalace_list_wings` | `mempalace_list_wings` | ✅ PASS | `testFeature20to25_MCP_Taxonomy_Status_Delete` |
+| 21 | Get taxonomy | `mempalace_get_taxonomy` | `mempalace_get_taxonomy` | ✅ PASS | `testFeature20to25_MCP_Taxonomy_Status_Delete` |
+| 22 | Delete drawer | `mempalace_delete_drawer` | `mempalace_delete_drawer` | ✅ PASS | `testFeature20to25_MCP_Taxonomy_Status_Delete` |
 | 23 | Traverse (navigate palace graph) | `mempalace_traverse` | ❌ | 🔲 TODO | — |
 | 24 | Find tunnels | `mempalace_find_tunnels` | ❌ | 🔲 TODO | — |
-| 25 | Palace status | `mempalace_status` | ❌ | 🔲 TODO | — |
+| 25 | Palace status | `mempalace_status` | `mempalace_status` | ✅ PASS | `testFeature20to25_MCP_Taxonomy_Status_Delete` |
 
 ### Tier 5: Knowledge Graph
 | # | Feature | Upstream | SwiftBuddy | Status | Test |
