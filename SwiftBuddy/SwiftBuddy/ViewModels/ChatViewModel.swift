@@ -31,11 +31,12 @@ final class ChatViewModel: ObservableObject {
         thinkingText = nil
         
         // --- INVISIBLE RAG INJECTION ---
-        var dynamicSystemPrompt = systemPrompt
+        var wakeUpText = ""
+        var activeRagDirective = ""
+        
         if let wing = currentWing, !wing.isEmpty {
             do {
-                // 1. WAKE-UP HOOK: Offline Persona Context Injection
-                var wakeUpText = ""
+                // 1. WAKE-UP HOOK: Offline Persona Context Injection (STATIC - preservers KV cache)
                 let coreFacts = try MemoryPalaceService.shared.fetchRoomContents(wingName: wing, roomName: "CORE IDENTITY")
                 let bgFacts = try MemoryPalaceService.shared.fetchRoomContents(wingName: wing, roomName: "BACKGROUND STORY")
                 let toneFacts = try MemoryPalaceService.shared.fetchRoomContents(wingName: wing, roomName: "TALK TONE")
@@ -47,15 +48,13 @@ final class ChatViewModel: ObservableObject {
                 
                 if !combinedIdentity.isEmpty {
                     wakeUpText = "SYSTEM PERSONA DIRECTIVE:\n\(combinedIdentity)\n\n"
-                    dynamicSystemPrompt = wakeUpText + dynamicSystemPrompt
                 }
                 
-                // 2. ACTIVE RAG HOOK
+                // 2. ACTIVE RAG HOOK (DYNAMIC - injected onto the newest turn to prevent cache wipe)
                 let facts = try MemoryPalaceService.shared.searchMemories(query: userText, wingName: wing)
                 if !facts.isEmpty {
                     let factList = facts.map { "- [\($0.hallType)] \($0.text)" }.joined(separator: "\n")
-                    let ragDirective = "\n\nCRITICAL CONTEXT FROM MEMORY PALACE:\n\(factList)\n\nYou must explicitly use these facts to answer if they are relevant to the user query."
-                    dynamicSystemPrompt += ragDirective
+                    activeRagDirective = "\n\n[RELEVANT MEMORY CONTEXT FOR THIS TURN]:\n\(factList)\n\nYou must strictly incorporate these facts if they are relevant here."
                 }
             } catch {
                 print("RAG Pre-Fetch Failed: \(error.localizedDescription)")
@@ -63,12 +62,22 @@ final class ChatViewModel: ObservableObject {
         }
 
         var fullMessages = messages
-        if !dynamicSystemPrompt.isEmpty {
+        
+        // Apply System Persona to the VERY FIRST User prompt permanently.
+        let identityPayload = wakeUpText + systemPrompt
+        if !identityPayload.isEmpty {
             if let firstUserIdx = fullMessages.firstIndex(where: { $0.role == .user }) {
                 let originalText = fullMessages[firstUserIdx].content
-                fullMessages[firstUserIdx].content = "SYSTEM DIRECTIVE & CONTEXT:\n\(dynamicSystemPrompt)\n\nUSER PROMPT:\n\(originalText)"
+                fullMessages[firstUserIdx].content = "SYSTEM DIRECTIVE & CONTEXT:\n\(identityPayload)\n\nUSER PROMPT:\n\(originalText)"
             } else {
-                fullMessages.insert(.user("SYSTEM DIRECTIVE & CONTEXT:\n\(dynamicSystemPrompt)"), at: 0)
+                fullMessages.insert(.user("SYSTEM DIRECTIVE & CONTEXT:\n\(identityPayload)"), at: 0)
+            }
+        }
+        
+        // Apply dynamic memory strictly to the CURRENT prompt so we don't destroy MLX's historical Prefix KV cache.
+        if !activeRagDirective.isEmpty {
+            if let lastUserIdx = fullMessages.lastIndex(where: { $0.role == .user }) {
+                fullMessages[lastUserIdx].content += activeRagDirective
             }
         }
         
