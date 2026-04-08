@@ -17,3 +17,8 @@ The HuggingFace model discovery and management system must allow users to search
 | 8 | Error state renders on network failure | ✅ PASS | `testFeature8_ErrorStateRendering` | 2026-04-07 |
 | 9 | HFModelResult correctly parses param size hints | ✅ PASS | `testFeature9_ParamSizeParsing` | 2026-04-07 |
 | 10 | HFModelResult correctly detects MoE architecture | ✅ PASS | `testFeature10_MoEDetection` | 2026-04-07 |
+| 11 | RAM Budget strictly filters models via `modelsForDevice` | ✅ PASS | `testFeature11_RAMBudgetFiltersModels` | 2026-04-07 |
+| 12 | Thermal throttling intercepts `.load()` and `.generate()` safely | ✅ PASS | `testFeature12_ThermalThrottles` | 2026-04-07 |
+| 13 | App background triggers `.unload()` gracefully | ✅ PASS | `testFeature13_BackgroundEjection` | 2026-04-07 |
+| 14 | MoE models automatically trigger `ExpertStreamingConfig` bypass | ✅ PASS | `testFeature14_SSDStreamingConfigBypass` | 2026-04-07 |
+| 15 | ModelCatalog accurately parses TurboQuant footprint estimations | ✅ PASS | `testFeature15_TurboQuantFootprint` | 2026-04-07 |
