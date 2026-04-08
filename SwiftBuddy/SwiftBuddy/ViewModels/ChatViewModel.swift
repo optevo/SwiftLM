@@ -59,7 +59,12 @@ final class ChatViewModel: ObservableObject {
 
         var fullMessages = messages
         if !dynamicSystemPrompt.isEmpty {
-            fullMessages.insert(.system(dynamicSystemPrompt), at: 0)
+            if let firstUserIdx = fullMessages.firstIndex(where: { $0.role == .user }) {
+                let originalText = fullMessages[firstUserIdx].content
+                fullMessages[firstUserIdx].content = "SYSTEM DIRECTIVE & CONTEXT:\n\(dynamicSystemPrompt)\n\nUSER PROMPT:\n\(originalText)"
+            } else {
+                fullMessages.insert(.user("SYSTEM DIRECTIVE & CONTEXT:\n\(dynamicSystemPrompt)"), at: 0)
+            }
         }
 
         generationTask = Task {
