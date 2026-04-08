@@ -62,7 +62,7 @@ public final class ExtractionService: ObservableObject {
         lastLog = "Engine finished. Parsing output..."
         
         // Clean markdown backticks if model generated them
-        let cleanedJSON = cleanJSON(jsonBuffer)
+        let cleanedJSON = JSONSanitizer.cleanJSON(jsonBuffer)
         
         guard let data = cleanedJSON.data(using: .utf8) else {
             lastLog = "Error: Model returned unparsable string characters."
@@ -88,15 +88,72 @@ public final class ExtractionService: ObservableObject {
         
         isMining = false
     }
-    
-    private func cleanJSON(_ string: String) -> String {
-        // Aggressively scan for the exact bounds of the JSON dictionary object
-        // by finding the first parsing bracket and the absolute last parsing bracket,
-        // completely ignoring any markdown backticks or LLM conversational text.
-        guard let start = string.firstIndex(of: "{"),
-              let end = string.lastIndex(of: "}") else {
-            return string.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+public struct JSONSanitizer {
+    public static func cleanJSON(_ raw: String) -> String {
+        var str = raw
+        
+        // Feature 9: Strip ANSI escape sequences \u001B[...m (from terminal debug spillovers)
+        if let regex = try? NSRegularExpression(pattern: "\u{001B}\\[[0-9;]*[a-zA-Z]", options: []) {
+            let range = NSRange(location: 0, length: str.utf16.count)
+            str = regex.stringByReplacingMatches(in: str, options: [], range: range, withTemplate: "")
         }
-        return String(string[start...end])
+        
+        str = str.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Feature 6: Handle empty / whitespace payloads unconditionally
+        if str.isEmpty { return "{}" }
+        
+        let firstBrace = str.firstIndex(of: "{")
+        let firstBracket = str.firstIndex(of: "[")
+        
+        enum RootType { case dict, array, none }
+        var type: RootType = .none
+        var startIdx = str.endIndex
+        
+        if let fBrace = firstBrace, let fBracket = firstBracket {
+            if fBrace < fBracket {
+                type = .dict; startIdx = fBrace
+            } else {
+                type = .array; startIdx = fBracket
+            }
+        } else if let fBrace = firstBrace {
+            type = .dict; startIdx = fBrace
+        } else if let fBracket = firstBracket {
+            type = .array; startIdx = fBracket
+        } else {
+            return "{}"
+        }
+        
+        let substring = String(str[startIdx...])
+        
+        if type == .dict {
+            if let lastBrace = substring.lastIndex(of: "}") {
+                let candidate = String(substring[...lastBrace])
+                
+                // Feature 7: Fragmented JSON blobs stitching `{...} {...}` -> `{ "extractions": [...] }`
+                if let regex = try? NSRegularExpression(pattern: "\\}\\s*\\{", options: []) {
+                    let range = NSRange(location: 0, length: candidate.utf16.count)
+                    if regex.firstMatch(in: candidate, options: [], range: range) != nil {
+                        let transformed = candidate.replacingOccurrences(of: "\\}\\s*\\{", with: "},{", options: .regularExpression)
+                        return "{ \"extractions\": [ \(transformed) ] }"
+                    }
+                }
+                return candidate
+            } else {
+                // Feature 4: Gracefully append missing `}` closures
+                return substring + "}"
+            }
+        } else if type == .array {
+            // Feature 5: Discover array bounds [...] independently mapping to ExtractionPayload format natively
+            if let lastBracket = substring.lastIndex(of: "]") {
+                let candidate = String(substring[...lastBracket])
+                return "{ \"extractions\": \(candidate) }"
+            } else {
+                return "{ \"extractions\": \(substring)] }"
+            }
+        }
+        
+        return "{}"
     }
 }
