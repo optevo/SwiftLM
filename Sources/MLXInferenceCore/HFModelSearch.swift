@@ -47,7 +47,7 @@ public struct HFModelResult: Identifiable, Sendable, Decodable {
     public var paramSizeHint: String? {
         let patterns = [
             #"(\d+)[xX](\d+)[Bb]"#, // 8x7B MoE
-            #"(\d+\.?\d*)[Bb]"#    // 7B, 0.5B, 3.8B
+            #"(\d+\.?\d*)[BbmM]"#   // 7B, 0.5B, 3.8B, 350M, 150m
         ]
         for pattern in patterns {
             if let match = repoName.range(of: pattern, options: .regularExpression) {
@@ -114,9 +114,17 @@ public enum HFSizeFilter: CaseIterable, Sendable, Equatable {
 
     public func matches(_ paramSizeText: String?) -> Bool {
         if self == .all { return true }
-        guard let sizeStr = paramSizeText?.lowercased().replacingOccurrences(of: "b", with: ""),
-              let size = Double(sizeStr) else {
-            return false // Best effort: Hide models with unknown sizes when tightly filtering
+        guard let txt = paramSizeText?.lowercased() else { return false }
+        
+        let size: Double
+        if txt.hasSuffix("m") {
+            let mStr = txt.replacingOccurrences(of: "m", with: "")
+            guard let mSize = Double(mStr) else { return false }
+            size = mSize / 1000.0 // Convert to Billions
+        } else {
+            let bStr = txt.replacingOccurrences(of: "b", with: "")
+            guard let bSize = Double(bStr) else { return false }
+            size = bSize
         }
         
         switch self {
@@ -147,7 +155,7 @@ public final class HFModelSearchService: ObservableObject {
     private let maxFetchTries = 3
     private let pageSize = 20
     
-    private var currentOffset = 0
+    private var nextPageUrlString: String? = nil
     private var currentQuery = ""
     private var currentSort = HFSortOption.trending
     private var currentSizeFilter = HFSizeFilter.all
@@ -167,7 +175,7 @@ public final class HFModelSearchService: ObservableObject {
             currentQuery = query
             currentSort  = sort
             currentSizeFilter = sizeFilter
-            currentOffset = 0
+            nextPageUrlString = nil
             results = []
             await fetchPage()
         }
@@ -192,39 +200,55 @@ public final class HFModelSearchService: ObservableObject {
         while localResults.count < 10 && tries < maxFetchTries {
             tries += 1
 
-            var finalQuery = currentQuery
-            if !strictMLX && !finalQuery.lowercased().contains("mlx") && !finalQuery.isEmpty {
-                finalQuery = finalQuery + " mlx"
-            }
+            var urlToFetch: URL
+            if let next = nextPageUrlString, let url = URL(string: next) {
+                urlToFetch = url
+            } else {
+                var finalQuery = currentQuery
+                if !strictMLX && !finalQuery.lowercased().contains("mlx") && !finalQuery.isEmpty {
+                    finalQuery = finalQuery + " mlx"
+                }
 
-            var components = URLComponents(string: hfBase)!
-            var queryItems: [URLQueryItem] = [
-                URLQueryItem(name: "pipeline_tag", value: "text-generation"),
-                URLQueryItem(name: "sort",         value: currentSort.rawValue),
-                URLQueryItem(name: "limit",        value: "\(pageSize)"),
-                URLQueryItem(name: "offset",       value: "\(currentOffset)"),
-                URLQueryItem(name: "full",         value: "false"),
-            ]
-            if !finalQuery.isEmpty {
-                queryItems.append(URLQueryItem(name: "search", value: finalQuery))
+                var components = URLComponents(string: hfBase)!
+                var queryItems: [URLQueryItem] = [
+                    URLQueryItem(name: "pipeline_tag", value: "text-generation"),
+                    URLQueryItem(name: "sort",         value: currentSort.rawValue),
+                    URLQueryItem(name: "limit",        value: "\(pageSize)"),
+                    URLQueryItem(name: "full",         value: "false"),
+                ]
+                if !finalQuery.isEmpty {
+                    queryItems.append(URLQueryItem(name: "search", value: finalQuery))
+                }
+                if strictMLX {
+                    queryItems.append(URLQueryItem(name: "library", value: "mlx"))
+                }
+                components.queryItems = queryItems
+                guard let constructedUrl = components.url else { break }
+                urlToFetch = constructedUrl
             }
-            if strictMLX {
-                queryItems.append(URLQueryItem(name: "library", value: "mlx"))
-            }
-            components.queryItems = queryItems
-
-            guard let url = components.url else { break }
             
             do {
-                let (data, response) = try await URLSession.shared.data(from: url)
+                let (data, response) = try await URLSession.shared.data(from: urlToFetch)
                 guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                     errorMessage = "HuggingFace API unavailable"
                     break
                 }
                 
+                nextPageUrlString = nil
+                if let linkHeader = http.value(forHTTPHeaderField: "Link") {
+                    let parts = linkHeader.components(separatedBy: ",")
+                    for part in parts {
+                        if part.contains("rel=\"next\"") {
+                            if let start = part.range(of: "<")?.upperBound,
+                               let end = part.range(of: ">")?.lowerBound {
+                                nextPageUrlString = String(part[start..<end])
+                            }
+                        }
+                    }
+                }
+                
                 var page = try JSONDecoder().decode([HFModelResult].self, from: data)
                 let originalPageCount = page.count
-                currentOffset += originalPageCount
 
                 // Local Size Filtering
                 if currentSizeFilter != .all {
