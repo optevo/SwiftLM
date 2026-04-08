@@ -71,29 +71,37 @@ def get_hf_cache_bytes(model_id):
 
 SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
-def poll_health(port=5413, timeout=30, model_id="", model_size_gb=0, check_overcommit_log=None, baseline_alloc=0, requires_dense_memory=False):
+def poll_health(server_proc, port=5422, timeout=30, model_id="", model_size_gb=0, check_overcommit_log=None, baseline_alloc=0, requires_dense_memory=False):
     start = time.time()
     url = f"http://127.0.0.1:{port}/health"
     total_bytes = int(model_size_gb * 1024**3) if model_size_gb > 0 else 0
     spin_idx = 0
-    last_bytes = 0
-    last_time = time.time()
+    initial_bytes = get_hf_cache_bytes(model_id) if (model_id and total_bytes > 0) else 0
+    start_dl_time = time.time()
     last_speed = 0.0
     downloading = False
     
     while time.time() - start < timeout:
+        # ── Check if server crashed ──
+        if server_proc.poll() is not None:
+            print("\n  [Abort] SwiftLM subprocess unexpectedly crashed!")
+            if check_overcommit_log and os.path.exists(check_overcommit_log):
+                print("  [Server Log Dump]:")
+                with open(check_overcommit_log, 'r') as f:
+                    lines = f.readlines()
+                    print("".join(lines[-15:]))
+            return False, False
+
         # ── Monitor download progress via filesystem ──
         if total_bytes > 0 and model_id:
             current_bytes = get_hf_cache_bytes(model_id)
             now = time.time()
             
-            dt = now - last_time
-            if dt >= 0.5:
-                speed = (current_bytes - last_bytes) / dt / (1024**2) if dt > 0 else 0
-                if speed > 0:
-                    last_speed = speed
-                last_bytes = current_bytes
-                last_time = now
+            dt_total = now - start_dl_time
+            if dt_total >= 1.0:
+                active_downloaded = current_bytes - initial_bytes
+                if active_downloaded > 0:
+                    last_speed = active_downloaded / dt_total / (1024**2)
             
             pct = min(current_bytes / total_bytes * 100, 100) if total_bytes > 0 else 0
             downloaded_gb = current_bytes / (1024**3)
@@ -165,7 +173,7 @@ def get_gpu_alloc_gb():
     except:
         return 0, 0
 
-def make_request_stream(prompt_len, max_tokens, port=5413):
+def make_request_stream(prompt_len, max_tokens, port=5422):
     prompt = "apple " * int(prompt_len * 0.75)
     data = json.dumps({
         "messages": [{"role": "user", "content": prompt}],
@@ -275,15 +283,16 @@ def main():
         
         log_path = "./tmp/profile_server.log"
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        cmd = [SWIFTLM_PATH, "--model", model_id] + config["flags"]
+        cmd = [SWIFTLM_PATH, "--model", model_id, "--port", "5422"] + config["flags"]
         
         with open(log_path, "w") as root_log:
             server_proc = subprocess.Popen(cmd, stdout=root_log, stderr=subprocess.STDOUT)
         
         requires_dense_memory = "--stream-experts" not in config["flags"]
         is_healthy, overcommitted = poll_health(
-            port=5413, 
-            timeout=120,
+            server_proc=server_proc,
+            port=5422, 
+            timeout=1800,
             model_id=model_id,
             model_size_gb=model_size_gb,
             check_overcommit_log=log_path, 
