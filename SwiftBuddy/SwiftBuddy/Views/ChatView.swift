@@ -33,7 +33,7 @@ struct ChatView: View {
                 inputBar
             }
         }
-        .navigationTitle("SwiftBuddy Chat")
+        .navigationTitle(viewModel.currentWing != nil ? "Chatting with \(viewModel.currentWing!)" : "SwiftBuddy Chat")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { iOSToolbar }
@@ -179,7 +179,7 @@ struct ChatView: View {
             brandMark
 
             VStack(spacing: 6) {
-                Text("SwiftBuddy Chat")
+                Text(viewModel.currentWing != nil ? "System Linked to \(viewModel.currentWing!)" : "SwiftBuddy Chat")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(SwiftBuddyTheme.textPrimary)
 
@@ -282,7 +282,7 @@ struct ChatView: View {
         HStack(alignment: .bottom, spacing: 10) {
             // Text field with frosted glass pill
             HStack(alignment: .bottom) {
-                TextField("Message", text: $inputText, axis: .vertical)
+                TextField(viewModel.currentWing != nil ? "Message \(viewModel.currentWing!)..." : "Message", text: $inputText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(.body))
                     .foregroundStyle(SwiftBuddyTheme.textPrimary)
