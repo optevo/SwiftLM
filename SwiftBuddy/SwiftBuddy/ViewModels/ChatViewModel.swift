@@ -53,7 +53,7 @@ final class ChatViewModel: ObservableObject {
         generationTask = Task {
             var response = ""
             var thinking = ""
-            var inThinkBlock = false
+            var hasRawThinkTags = false
 
             for await token in engine.generate(messages: fullMessages, config: config) {
                 guard !Task.isCancelled else { break }
@@ -62,22 +62,58 @@ final class ChatViewModel: ObservableObject {
                     thinking += token.text
                     thinkingText = thinking
                 } else {
-                    // Strip any residual </think> tag from visible output
-                    var visible = token.text
-                    if visible.contains("</think>") {
-                        visible = visible.replacingOccurrences(of: "</think>", with: "")
-                        inThinkBlock = false
-                    }
-                    if !inThinkBlock {
-                        response += visible
-                        streamingText = response
+                    response += token.text
+                    
+                    // Fallback cleanup if the model outputs literal <think>...</think> tags
+                    // and the tokenizer isn't setting the isThinking flag correctly.
+                    if response.contains("<think>") {
+                        hasRawThinkTags = true
+                        
+                        // Try to safely extract thinking content between the tags
+                        if let startRange = response.range(of: "<think>"),
+                           let endRange = response.range(of: "</think>") {
+                            // Extract thinking
+                            let rawThinking = String(response[startRange.upperBound..<endRange.lowerBound])
+                            thinkingText = rawThinking
+                            
+                            // Remove the entire block from the visible response
+                            let before = String(response[..<startRange.lowerBound])
+                            let after = String(response[endRange.upperBound...])
+                            streamingText = before + after
+                        } else if let startRange = response.range(of: "<think>") {
+                            // We have a start tag but no end tag yet, it's currently generating the thought
+                            let rawThinking = String(response[startRange.upperBound...])
+                            thinkingText = rawThinking
+                            
+                            // Only update streaming text with what came before
+                            streamingText = String(response[..<startRange.lowerBound])
+                        }
+                    } else if !hasRawThinkTags {
+                        // Standard flow: no raw tags seen yet, just stream normally
+                        streamingText = response 
                     }
                 }
             }
 
             // Commit completed message
             if !response.isEmpty {
-                messages.append(.assistant(response))
+                // Do a final cleanup just in case
+                var finalVisible = response
+                if let startRange = response.range(of: "<think>"),
+                   let endRange = response.range(of: "</think>") {
+                    let before = String(response[..<startRange.lowerBound])
+                    let after = String(response[endRange.upperBound...])
+                    finalVisible = before + after
+                } else if let startRange = response.range(of: "<think>") {
+                     finalVisible = String(response[..<startRange.lowerBound])
+                }
+                
+                // Trim leading newlines that often follow thought blocks
+                finalVisible = finalVisible.trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                if !finalVisible.isEmpty {
+                    messages.append(.assistant(finalVisible))
+                }
             }
 
             streamingText = ""
