@@ -14,6 +14,70 @@ struct ExtractionPayload: Codable {
     let extractions: [ExtractedMemory]
 }
 
+public struct ToolCall: Codable, Equatable {
+    public let name: String
+    public let parameters: [String: Any]?
+    
+    enum CodingKeys: String, CodingKey {
+        case name, parameters
+    }
+    
+    public init(name: String, parameters: [String: Any]? = nil) {
+        self.name = name
+        self.parameters = parameters
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        if let paramsData = try? container.decode([String: AnyCodable].self, forKey: .parameters), !paramsData.isEmpty {
+            var params: [String: Any] = [:]
+            for (k, v) in paramsData { params[k] = v.value }
+            parameters = params
+        } else {
+            parameters = nil
+        }
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        if let p = parameters {
+            var codableParams: [String: AnyCodable] = [:]
+            for (k, v) in p { codableParams[k] = AnyCodable(v) }
+            try container.encode(codableParams, forKey: .parameters)
+        }
+    }
+    
+    public static func == (lhs: ToolCall, rhs: ToolCall) -> Bool {
+        lhs.name == rhs.name // Basic equality for testing
+    }
+}
+
+// AnyCodable helper for loose JSON dictionary parameters
+public struct AnyCodable: Codable {
+    public let value: Any
+    
+    public init(_ value: Any) { self.value = value }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let v = try? container.decode(String.self) { value = v }
+        else if let v = try? container.decode(Int.self) { value = v }
+        else if let v = try? container.decode(Double.self) { value = v }
+        else if let v = try? container.decode(Bool.self) { value = v }
+        else { throw DecodingError.dataCorruptedError(in: container, debugDescription: "AnyCodable unsupported type") }
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        if let v = value as? String { try container.encode(v) }
+        else if let v = value as? Int { try container.encode(v) }
+        else if let v = value as? Double { try container.encode(v) }
+        else if let v = value as? Bool { try container.encode(v) }
+    }
+}
+
 @MainActor
 public final class ExtractionService: ObservableObject {
     public static let shared = ExtractionService()
@@ -94,6 +158,19 @@ public final class ExtractionService: ObservableObject {
         }
         
         isMining = false
+    }
+    
+    // Feature 3: Extract tool call block from LLM stream
+    public static func extractToolCall(from text: String) -> ToolCall? {
+        guard let startRange = text.range(of: "<tool_call>"),
+              let endRange = text.range(of: "</tool_call>") else {
+            return nil
+        }
+        
+        let jsonPayload = String(text[startRange.upperBound..<endRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard let data = jsonPayload.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(ToolCall.self, from: data)
     }
 }
 

@@ -15,6 +15,7 @@ public struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         case system
         case user
         case assistant
+        case tool
     }
 
     public init(role: Role, content: String, thinkingContent: String? = nil, id: UUID = UUID(), timestamp: Date = Date()) {
@@ -34,5 +35,8 @@ public struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     }
     public static func assistant(_ content: String, thinkingContent: String? = nil) -> ChatMessage {
         ChatMessage(role: .assistant, content: content, thinkingContent: thinkingContent)
+    }
+    public static func tool(_ content: String) -> ChatMessage {
+        ChatMessage(role: .tool, content: content)
     }
 }

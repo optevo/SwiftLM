@@ -20,6 +20,12 @@ public final class RegistryService: ObservableObject {
     @Published public var isSyncing: Bool = false
     @Published public var lastSyncLog: String = ""
     
+    // Extraction Telemetry
+    @Published public var extractionPhase: String = ""
+    @Published public var extractionTotal: Int = 0
+    @Published public var extractionProcessed: Int = 0
+    @Published public var currentChunkText: String = ""
+    
     private let repoBaseUrl = "https://raw.githubusercontent.com/SharpAI/swiftbuddy-registry/main"
     
     private init() {}
@@ -90,7 +96,7 @@ public final class RegistryService: ObservableObject {
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
                 
-            try? MemoryPalaceService.shared.saveMemories(
+            _ = try? await MemoryPalaceService.shared.saveMemories(
                 wingName: "Einstein Localized",
                 roomName: "corpus",
                 texts: chunks,
@@ -126,11 +132,19 @@ public final class RegistryService: ObservableObject {
                         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .filter { !$0.isEmpty }
                     
-                    try? MemoryPalaceService.shared.saveMemories(
+                    _ = try? await MemoryPalaceService.shared.saveMemories(
                         wingName: name.replacingOccurrences(of: "_", with: " "),
                         roomName: roomName.replacingOccurrences(of: "_", with: " "),
                         texts: chunks,
-                        type: roomName.lowercased() == "corpus" ? "hall_facts" : "hall_preferences"
+                        type: roomName.lowercased() == "corpus" ? "hall_facts" : "hall_preferences",
+                        onProgress: { cur, tot, txt in
+                            DispatchQueue.main.async {
+                                self.extractionPhase = roomName
+                                self.extractionProcessed = cur
+                                self.extractionTotal = tot
+                                self.currentChunkText = txt
+                            }
+                        }
                     )
                 }
             } catch {

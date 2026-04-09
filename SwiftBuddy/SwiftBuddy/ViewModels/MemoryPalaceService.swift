@@ -81,7 +81,7 @@ final class MemoryPalaceService {
     }
     
     @discardableResult
-    func saveMemories(wingName: String, roomName: String, texts: [String], type: String = "Facts") throws -> Int {
+    func saveMemories(wingName: String, roomName: String, texts: [String], type: String = "Facts", onProgress: ((Int, Int, String) -> Void)? = nil) async throws -> Int {
         guard let context = modelContext else { throw URLError(.badServerResponse) }
         guard !texts.isEmpty else { return 0 }
         
@@ -106,7 +106,9 @@ final class MemoryPalaceService {
         var savedCount = 0
         
         // Batch embedding extraction and insertion
-        for text in texts {
+        for (index, text) in texts.enumerated() {
+            onProgress?(index + 1, texts.count, text)
+            await Task.yield()
             guard let vector = generateEmbedding(for: text) else { continue }
             
             var isDuplicate = false

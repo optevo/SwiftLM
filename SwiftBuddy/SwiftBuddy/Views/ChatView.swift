@@ -29,6 +29,21 @@ struct ChatView: View {
 
                 // ── Engine state banner ──────────────────────────────────────
                 engineBanner
+                
+                // ── Memory Active Badge ──────────────────────────────────────
+                if let wing = viewModel.currentWing {
+                    HStack {
+                        Image(systemName: "brain.head.profile")
+                        Text("\(wing)'s Memory Active")
+                    }
+                    .font(.caption2.bold())
+                    .foregroundStyle(SwiftBuddyTheme.accent)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(SwiftBuddyTheme.accent.opacity(0.18))
+                    .clipShape(Capsule())
+                    .padding(.vertical, 6)
+                }
 
                 // ── Input bar ────────────────────────────────────────────────
                 inputBar
@@ -231,7 +246,20 @@ struct ChatView: View {
         case .error(let msg):
             bannerRow(icon: "exclamationmark.triangle.fill", text: msg, color: SwiftBuddyTheme.error)
         case .ready, .generating:
-            EmptyView()
+            if engine.maxContextWindow > 0 && !viewModel.messages.isEmpty {
+                HStack {
+                    Spacer()
+                    let percent = Double(engine.activeContextTokens) / Double(engine.maxContextWindow)
+                    let displayColor: Color = percent > 0.85 ? SwiftBuddyTheme.error : (percent > 0.6 ? SwiftBuddyTheme.warning : SwiftBuddyTheme.textTertiary)
+                    Text("Context: \(engine.activeContextTokens) / \(engine.maxContextWindow)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(displayColor)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
+            } else {
+                EmptyView()
+            }
         }
     }
 
@@ -253,6 +281,19 @@ struct ChatView: View {
 
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 10) {
+            
+            if !viewModel.messages.isEmpty {
+                Button(action: {
+                    withAnimation { viewModel.newConversation() }
+                }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 19))
+                        .foregroundStyle(SwiftBuddyTheme.textSecondary)
+                        .padding(.bottom, 12)
+                }
+                .buttonStyle(.plain)
+            }
+            
             // Text field with frosted glass pill
             HStack(alignment: .bottom) {
                 TextField(viewModel.currentWing != nil ? "Message \(viewModel.currentWing!)..." : "Message", text: $inputText, axis: .vertical)

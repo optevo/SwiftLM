@@ -110,6 +110,8 @@ public struct GenerationToken: Sendable {
 public final class InferenceEngine: ObservableObject {
     @Published public private(set) var state: ModelState = .idle
     @Published public private(set) var thermalLevel: ThermalLevel = .nominal
+    @Published public private(set) var activeContextTokens: Int = 0
+    @Published public private(set) var maxContextWindow: Int = 0
 
     /// Whether to automatically unload the model when the app backgrounds
     /// and reload it when returning to foreground.
@@ -385,6 +387,17 @@ public final class InferenceEngine: ObservableObject {
 
                     let userInput = UserInput(messages: mlxMessages)
                     let lmInput = try await container.prepare(input: userInput)
+                    
+                    // Approximate the input token size (as LMInput wrapper blocks direct inspection without private API)
+                    // MLX often counts 1 word roughly as 1.3 tokens. 
+                    let stringLength = mlxMessages.map { ($0["content"] as? String ?? "").count }.reduce(0, +)
+                    let baseTokens = Int(Double(stringLength) / 3.5)
+                    self.activeContextTokens = baseTokens
+                    
+                    // If we have a max length config, expose it
+                    // TODO: Safely extract from ModelConfiguration when MLX exposes it dynamically
+                    self.maxContextWindow = 8192
+                    
                     let stream: AsyncStream<Generation> = try await container.generate(
                         input: lmInput,
                         parameters: params
@@ -396,6 +409,11 @@ public final class InferenceEngine: ObservableObject {
                         if case .chunk(let text, tokenId: _) = generation {
                             outputText += text
                             tokenCount += 1
+                            
+                            // Update the UI token counter periodically to save CPU
+                            if tokenCount % 10 == 0 {
+                                self.activeContextTokens = baseTokens + tokenCount
+                            }
 
                             if tokenCount >= config.maxTokens { break }
                             
