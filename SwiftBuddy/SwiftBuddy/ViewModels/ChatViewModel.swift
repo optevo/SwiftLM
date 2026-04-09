@@ -69,15 +69,6 @@ final class ChatViewModel: ObservableObject {
             }
         }
 
-        // Apply System Persona to the VERY FIRST User prompt permanently inside the official state.
-        let identityPayload = wakeUpText + systemPrompt
-        if !identityPayload.isEmpty && messages.count == 1 {
-            if let firstUserIdx = messages.firstIndex(where: { $0.role == .user }) {
-                let originalText = messages[firstUserIdx].content
-                messages[firstUserIdx].content = "SYSTEM DIRECTIVE & CONTEXT:\n\(identityPayload)\n\nUSER PROMPT:\n\(originalText)"
-            }
-        }
-
         // Apply dynamic memory strictly to the CURRENT prompt PERMANENTLY so we don't destroy MLX's historical Prefix KV cache on the next turn!
         if !activeRagDirective.isEmpty {
             if let lastUserIdx = messages.lastIndex(where: { $0.role == .user }) {
@@ -86,6 +77,14 @@ final class ChatViewModel: ObservableObject {
         }
         
         var fullMessages = messages
+        
+        // 1. Prepend System Persona dynamically for the MLX Engine context (Stateless & Cache-Perfect)
+        let identityPayload = wakeUpText + systemPrompt
+        if !identityPayload.isEmpty {
+            // Remove any existing system roles to prevent duplication
+            fullMessages.removeAll { $0.role == .system }
+            fullMessages.insert(ChatMessage.system(identityPayload), at: 0)
+        }
         
         // Squash consecutive roles to prevent Jinja alternation crashes on strict models (e.g., Gemma)
         var collapsedMessages: [ChatMessage] = []
