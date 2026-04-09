@@ -243,6 +243,9 @@ struct MLXServer: AsyncParsableCommand {
     @Flag(name: .long, help: "Enable SSD expert streaming for MoE models (Flash-MoE style memory-mapping)")
     var streamExperts: Bool = false
 
+    @Flag(name: .long, help: "Enable 16-worker background SSD thread pool queue (PAPPS). Requires --stream-experts.")
+    var ssdPrefetch: Bool = false
+
     @Flag(name: .long, help: "Enable TurboQuant KV-cache compression (3-bit PolarQuant+QJL). Compresses KV history > 8192 tokens to ~3.5 bits/token — recommended for 100k+ context. Default: disabled")
     var turboKV: Bool = false
 
@@ -428,6 +431,10 @@ struct MLXServer: AsyncParsableCommand {
             let streamingEnabled = await container.setStreamExperts(true)
             if streamingEnabled {
                 print("[SwiftLM] 💾 SSD Expert Streaming enabled (lazy load + layer-sync)")
+                if self.ssdPrefetch {
+                    MLXFast.setPrefetchEnabled(true)
+                    print("[SwiftLM] 🚀 PAPPS 16-Worker Thread Pool prefetcher enabled!")
+                }
             } else {
                 print("[SwiftLM] ⚠️  Model does not support SSD expert streaming")
             }

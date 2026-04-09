@@ -13,7 +13,8 @@ CONFIGS = [
     {"name": "Dense/Vanilla", "flags": []},
     {"name": "SSD Stream", "flags": ["--stream-experts"]},
     {"name": "TurboQuant", "flags": ["--turbo-kv"]},
-    {"name": "SSD + TurboQuant", "flags": ["--stream-experts", "--turbo-kv"]}
+    {"name": "SSD + TurboQuant", "flags": ["--stream-experts", "--turbo-kv"]},
+    {"name": "SSD + 16-Worker Prefetch", "flags": ["--stream-experts", "--ssd-prefetch"]}
 ]
 
 SWIFTLM_PATH = ".build/arm64-apple-macosx/release/SwiftLM"
@@ -271,15 +272,20 @@ def main():
         requires_dense_memory = "--stream-experts" not in config["flags"]
         
         # 1) PRE-BOOT Check: If we know the size from HF API, skip early to avoid freezing the system!
-        if requires_dense_memory and model_size_gb > 0:
+        if requires_dense_memory:
+            demand = baseline_alloc
             phys_ram_gb = get_physical_ram_gb()
-            if phys_ram_gb > 0:
-                demand = model_size_gb + baseline_alloc
-                if demand > phys_ram_gb * 1.30:
-                    print(f"  [Abort] Early pre-boot check shows config requires {demand:.1f}GB demand.")
-                    print(f"  This exceeds physical RAM ({phys_ram_gb:.1f}GB) by >30%.")
-                    print(f"  > Skipping {config['name']} to protect system stability.")
-                    continue
+            
+            if model_size_gb > 0:
+                demand += model_size_gb
+            elif "270GB" in args.model or "GLM-5.1" in args.model:
+                demand += 280.0
+                
+            if phys_ram_gb > 0 and demand > phys_ram_gb * 1.30:
+                print(f"  [Abort] Early pre-boot check shows config requires {demand:.1f}GB demand.")
+                print(f"  This exceeds physical RAM ({phys_ram_gb:.1f}GB) by >30%.")
+                print(f"  > Skipping {config['name']} to protect system stability.")
+                continue
         
         log_path = "./tmp/profile_server.log"
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -310,8 +316,8 @@ def main():
         static_mem = extract_base_memory(log_path)
         
         for ctx_size in context_sizes:
-            print(f"\n>> Running {ctx_size}-token context test (max generation ~20)...")
-            ok, ttft, tps = make_request_stream(prompt_len=ctx_size, max_tokens=20)
+            print(f"\n>> Running {ctx_size}-token context test (max generation ~2)...")
+            ok, ttft, tps = make_request_stream(prompt_len=ctx_size, max_tokens=2)
             
             # Wait for server to flush post-generation logs
             time.sleep(1)
