@@ -92,10 +92,7 @@ public final class RegistryService: ObservableObject {
             He formulated the theory of relativity, forever reshaping our understanding of space, time, and gravity through his famous equation E = mc^2.
             """
             
-            let chunks = mockCorpus.components(separatedBy: "\n\n")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                
+            let chunks = TextCombiner.chunkText(mockCorpus, chunkSize: 800, chunkOverlap: 100, minChunkSize: 50)
             _ = try? await MemoryPalaceService.shared.saveMemories(
                 wingName: "Einstein Localized",
                 roomName: "corpus",
@@ -128,10 +125,7 @@ public final class RegistryService: ObservableObject {
                     guard let textContent = String(data: data, encoding: .utf8), !textContent.isEmpty else { continue }
                     fetchedAny = true
                     
-                    let chunks = textContent.components(separatedBy: "\n\n")
-                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                        .filter { !$0.isEmpty }
-                    
+                    let chunks = TextCombiner.chunkText(textContent, chunkSize: 800, chunkOverlap: 100, minChunkSize: 50)
                     _ = try? await MemoryPalaceService.shared.saveMemories(
                         wingName: name.replacingOccurrences(of: "_", with: " "),
                         roomName: roomName.replacingOccurrences(of: "_", with: " "),

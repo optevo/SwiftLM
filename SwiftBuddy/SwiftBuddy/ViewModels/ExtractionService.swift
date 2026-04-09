@@ -241,3 +241,70 @@ public struct JSONSanitizer {
         return "{}"
     }
 }
+
+public struct TextCombiner {
+    
+    /// Splits content into overlapping string chunks based on mempalace/miner.py RAG behavior.
+    ///
+    /// - Parameters:
+    ///   - content: Raw text to split.
+    ///   - chunkSize: Maximum characters per chunk (default 800).
+    ///   - chunkOverlap: Characters to overlap when sliding to the next window (default 100).
+    ///   - minChunkSize: Any extracted chunk smaller than this is dropped (default 50).
+    public static func chunkText(_ content: String, chunkSize: Int = 800, chunkOverlap: Int = 100, minChunkSize: Int = 50) -> [String] {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return [] }
+        
+        var chunks: [String] = []
+        var currentIndex = text.startIndex
+        
+        while currentIndex < text.endIndex {
+            var endIndex = text.index(currentIndex, offsetBy: chunkSize, limitedBy: text.endIndex) ?? text.endIndex
+            
+            // Try to gently break at a clean paragraph boundary (\n\n) or line edge (\n) 
+            // if we are near the chunk boundary.
+            if endIndex < text.endIndex {
+                let chunkRange = currentIndex..<endIndex
+                let substring = text[chunkRange]
+                
+                if let lastDoubleNewline = substring.range(of: "\n\n", options: .backwards) {
+                    let distance = text.distance(from: currentIndex, to: lastDoubleNewline.lowerBound)
+                    // Only break if it's past the midpoint to avoid tiny chunks
+                    if distance > chunkSize / 2 {
+                        endIndex = lastDoubleNewline.lowerBound
+                    } else if let lastNewline = substring.range(of: "\n", options: .backwards) {
+                        let singleDistance = text.distance(from: currentIndex, to: lastNewline.lowerBound)
+                        if singleDistance > chunkSize / 2 {
+                            endIndex = lastNewline.lowerBound
+                        }
+                    }
+                } else if let lastNewline = substring.range(of: "\n", options: .backwards) {
+                    let singleDistance = text.distance(from: currentIndex, to: lastNewline.lowerBound)
+                    if singleDistance > chunkSize / 2 {
+                        endIndex = lastNewline.lowerBound
+                    }
+                }
+            }
+            
+            let chunkString = String(text[currentIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if chunkString.count >= minChunkSize {
+                chunks.append(chunkString)
+            }
+            
+            if endIndex == text.endIndex {
+                break
+            }
+            
+            // Rewind by overlap to ensure sentences aren't cleanly sliced in half
+            currentIndex = text.index(endIndex, offsetBy: -chunkOverlap, limitedBy: text.startIndex) ?? text.startIndex
+            
+            // Fast-forward past any immediate leading whitespace for the new chunk
+            while currentIndex < text.endIndex && text[currentIndex].isWhitespace {
+                currentIndex = text.index(after: currentIndex)
+            }
+        }
+        
+        return chunks
+    }
+}
+
