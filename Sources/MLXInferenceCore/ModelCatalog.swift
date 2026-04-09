@@ -52,15 +52,7 @@ public enum ModelCatalog {
 
     /// All available models, ordered from smallest to largest.
     public static let all: [ModelEntry] = [
-        ModelEntry(
-            id: "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
-            displayName: "Qwen 2.5 0.5B",
-            parameterSize: "0.5B",
-            quantization: "4-bit",
-            ramRequiredGB: 0.5,
-            ramRecommendedGB: 1.0,
-            badge: "⚡ Tiny"
-        ),
+
         ModelEntry(
             id: "mlx-community/Phi-3.5-mini-instruct-4bit",
             displayName: "Phi-3.5 Mini",
@@ -79,15 +71,7 @@ public enum ModelCatalog {
             ramRecommendedGB: 2.5,
             badge: "🦙 Popular"
         ),
-        ModelEntry(
-            id: "mlx-community/Qwen2.5-7B-Instruct-4bit",
-            displayName: "Qwen 2.5 7B",
-            parameterSize: "7B",
-            quantization: "4-bit",
-            ramRequiredGB: 4.2,
-            ramRecommendedGB: 6.0,
-            badge: "🧠 Smart"
-        ),
+
         ModelEntry(
             id: "mlx-community/Mistral-7B-Instruct-v0.3-4bit",
             displayName: "Mistral 7B",
@@ -96,24 +80,7 @@ public enum ModelCatalog {
             ramRequiredGB: 4.1,
             ramRecommendedGB: 6.0
         ),
-        ModelEntry(
-            id: "mlx-community/Qwen2.5-14B-Instruct-4bit",
-            displayName: "Qwen 2.5 14B",
-            parameterSize: "14B",
-            quantization: "4-bit",
-            ramRequiredGB: 8.5,
-            ramRecommendedGB: 12.0,
-            badge: "🧠 Powerful"
-        ),
-        ModelEntry(
-            id: "mlx-community/Qwen2.5-32B-Instruct-4bit",
-            displayName: "Qwen 2.5 32B",
-            parameterSize: "32B",
-            quantization: "4-bit",
-            ramRequiredGB: 19.0,
-            ramRecommendedGB: 24.0,
-            badge: "🔬 Expert"
-        ),
+
         // ── Qwen3 dense series ───────────────────────────────────────────────
         // Naming: mlx-community/Qwen3-{size}-4bit (no -Instruct suffix)
         ModelEntry(
