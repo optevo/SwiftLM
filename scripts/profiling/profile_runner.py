@@ -13,23 +13,149 @@ CONFIGS = [
     {"name": "Dense/Vanilla", "flags": []},
     {"name": "SSD Stream", "flags": ["--stream-experts"]},
     {"name": "TurboQuant", "flags": ["--turbo-kv"]},
-    {"name": "SSD + TurboQuant", "flags": ["--stream-experts", "--turbo-kv"]}
+    {"name": "SSD + TurboQuant", "flags": ["--stream-experts", "--turbo-kv"]},
+    {"name": "SSD + 16-Worker Prefetch", "flags": ["--stream-experts", "--ssd-prefetch"]}
 ]
 
 SWIFTLM_PATH = ".build/arm64-apple-macosx/release/SwiftLM"
 
-def poll_health(port=5413, timeout=30):
+def get_physical_ram_gb():
+    try:
+        result = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True)
+        return int(result.stdout.strip()) / (1024**3)
+    except:
+        return 0
+
+def get_hf_model_size_gb(model_id):
+    try:
+        url = f"https://huggingface.co/api/models/{model_id}/tree/main"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req) as r:
+            tree = json.loads(r.read().decode())
+            total_bytes = sum(f.get('size', 0) for f in tree if f.get('path', '').endswith('.safetensors'))
+            if total_bytes > 0: return total_bytes / (1024**3)
+    except: pass
+    
+    try:
+        url = f"https://huggingface.co/api/models/{model_id}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req) as r:
+            data = json.loads(r.read().decode())
+            if "safetensors" in data and "total" in data["safetensors"]:
+                return data["safetensors"]["total"] / (1024**3)
+    except: pass
+    return 0.0
+
+def get_hf_cache_bytes(model_id):
+    """Scan the HuggingFace cache directory for total downloaded bytes for a model."""
+    home = os.path.expanduser("~")
+    folder_name = "models--" + model_id.replace("/", "--")
+    
+    cache_dirs = [
+        os.path.join(home, ".cache/huggingface/hub", folder_name),
+        os.path.join(home, "Library/Caches/huggingface/hub", folder_name),
+    ]
+    
+    total = 0
+    for cache_dir in cache_dirs:
+        if not os.path.isdir(cache_dir):
+            continue
+        for root, dirs, files in os.walk(cache_dir):
+            for f in files:
+                fp = os.path.join(root, f)
+                try:
+                    if not os.path.islink(fp):
+                        total += os.path.getsize(fp)
+                except:
+                    pass
+    return total
+
+SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+def poll_health(server_proc, port=5422, timeout=30, model_id="", model_size_gb=0, check_overcommit_log=None, baseline_alloc=0, requires_dense_memory=False):
     start = time.time()
     url = f"http://127.0.0.1:{port}/health"
+    total_bytes = int(model_size_gb * 1024**3) if model_size_gb > 0 else 0
+    spin_idx = 0
+    initial_bytes = get_hf_cache_bytes(model_id) if (model_id and total_bytes > 0) else 0
+    start_dl_time = time.time()
+    last_speed = 0.0
+    downloading = False
+    
     while time.time() - start < timeout:
+        # ── Check if server crashed ──
+        if server_proc.poll() is not None:
+            print("\n  [Abort] SwiftLM subprocess unexpectedly crashed!")
+            if check_overcommit_log and os.path.exists(check_overcommit_log):
+                print("  [Server Log Dump]:")
+                with open(check_overcommit_log, 'r') as f:
+                    lines = f.readlines()
+                    print("".join(lines[-15:]))
+            return False, False
+
+        # ── Monitor download progress via filesystem ──
+        if total_bytes > 0 and model_id:
+            current_bytes = get_hf_cache_bytes(model_id)
+            now = time.time()
+            
+            dt_total = now - start_dl_time
+            if dt_total >= 1.0:
+                active_downloaded = current_bytes - initial_bytes
+                if active_downloaded > 0:
+                    last_speed = active_downloaded / dt_total / (1024**2)
+            
+            pct = min(current_bytes / total_bytes * 100, 100) if total_bytes > 0 else 0
+            downloaded_gb = current_bytes / (1024**3)
+            total_gb = total_bytes / (1024**3)
+            
+            if pct < 99.5 and downloaded_gb > 0.1:
+                downloading = True
+                bar_len = 25
+                filled = int(pct / 100 * bar_len)
+                bar_str = "=" * max(0, filled - 1) + (">" if filled > 0 else "") + " " * (bar_len - filled)
+                spin_idx = (spin_idx + 1) % len(SPINNER)
+                speed_str = f"{last_speed:.1f} MB/s" if last_speed > 0 else "..."
+                
+                sys.stdout.write(f"\r  {SPINNER[spin_idx]} Download: [{bar_str}] {pct:5.1f}%  {downloaded_gb:.1f} / {total_gb:.1f} GB  | {speed_str}   ")
+                sys.stdout.flush()
+                start = time.time()  # Reset timeout — download is active
+            elif downloading and pct >= 99.5:
+                sys.stdout.write(f"\r  ✅ Download complete: {downloaded_gb:.1f} GB{' ' * 50}\n")
+                sys.stdout.flush()
+                downloading = False
+        
+        # ── Fallback overcommitment check from server log ──
+        if requires_dense_memory and check_overcommit_log and os.path.exists(check_overcommit_log):
+            try:
+                with open(check_overcommit_log, "r") as f:
+                    for line in f:
+                        m = re.search(r"\(([0-9.]+)GB model\)", line)
+                        if m:
+                            model_gb = float(m.group(1))
+                            phys_ram_gb = get_physical_ram_gb()
+                            if phys_ram_gb > 0:
+                                demand = model_gb + baseline_alloc
+                                if demand > phys_ram_gb * 1.30:
+                                    if downloading:
+                                        sys.stdout.write("\n")
+                                    print(f"\n  [Abort] Configuration requires {demand:.1f}GB. Exceeds physical RAM ({phys_ram_gb:.1f}GB) by >30%.")
+                                    return False, True
+            except: pass
+
         try:
             r = urllib.request.urlopen(url)
             if r.getcode() == 200:
-                return True
+                if downloading:
+                    sys.stdout.write(f"\r  ✅ Model loaded!{' ' * 60}\n")
+                    sys.stdout.flush()
+                return True, False
         except:
             pass
         time.sleep(1)
-    return False
+        
+    if downloading:
+        sys.stdout.write("\n")
+    return False, False
 
 def get_gpu_alloc_gb():
     """Query Apple GPU driver for total allocated system memory via ioreg.
@@ -48,7 +174,7 @@ def get_gpu_alloc_gb():
     except:
         return 0, 0
 
-def make_request_stream(prompt_len, max_tokens, port=5413):
+def make_request_stream(prompt_len, max_tokens, port=5422):
     prompt = "apple " * int(prompt_len * 0.75)
     data = json.dumps({
         "messages": [{"role": "user", "content": prompt}],
@@ -90,9 +216,8 @@ def extract_base_memory(log_path):
     try:
         with open(log_path, 'r') as f:
             for line in f:
-                if "Memory strategy: FULL GPU" in line:
-                    m = re.search(r"\(([0-9.]+)GB model", line)
-                    if m: return f"{m.group(1)} GB"
+                m = re.search(r"\(([0-9.]+)GB model\)", line)
+                if m: return f"{m.group(1)} GB"
     except: pass
     return "N/A"
 
@@ -138,28 +263,66 @@ def main():
     baseline_alloc, _ = get_gpu_alloc_gb()
     print(f"Baseline GPU alloc (no model): {baseline_alloc:.1f} GB")
     
+    model_size_gb = get_hf_model_size_gb(model_id)
+    if model_size_gb > 0:
+        print(f"Model Framework Size: {model_size_gb:.1f} GB (via Hugging Face API)")
+    else:
+        print("Model Framework Size: Unknown (failed to fetch from API)")
+    
     for config in CONFIGS:
         print(f"\n==============================================")
         print(f"--- Profiling {args.model} [{config['name']}] ---")
         print(f"==============================================")
         
+        requires_dense_memory = "--stream-experts" not in config["flags"]
+        
+        # 1) PRE-BOOT Check: If we know the size from HF API, skip early to avoid freezing the system!
+        if requires_dense_memory:
+            demand = baseline_alloc
+            phys_ram_gb = get_physical_ram_gb()
+            
+            if model_size_gb > 0:
+                demand += model_size_gb
+            elif "270GB" in args.model or "GLM-5.1" in args.model:
+                demand += 280.0
+                
+            if phys_ram_gb > 0 and demand > phys_ram_gb * 1.30:
+                print(f"  [Abort] Early pre-boot check shows config requires {demand:.1f}GB demand.")
+                print(f"  This exceeds physical RAM ({phys_ram_gb:.1f}GB) by >30%.")
+                print(f"  > Skipping {config['name']} to protect system stability.")
+                continue
+        
         log_path = "./tmp/profile_server.log"
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        cmd = [SWIFTLM_PATH, "--model", model_id] + config["flags"]
+        cmd = [SWIFTLM_PATH, "--model", model_id, "--port", "5422"] + config["flags"]
         
         with open(log_path, "w") as root_log:
             server_proc = subprocess.Popen(cmd, stdout=root_log, stderr=subprocess.STDOUT)
         
-        if not poll_health(timeout=60):
-            print("Server failed to start.")
+        requires_dense_memory = "--stream-experts" not in config["flags"]
+        is_healthy, overcommitted = poll_health(
+            server_proc=server_proc,
+            port=5422, 
+            timeout=1800,
+            model_id=model_id,
+            model_size_gb=model_size_gb,
+            check_overcommit_log=log_path, 
+            baseline_alloc=baseline_alloc, 
+            requires_dense_memory=requires_dense_memory
+        )
+        
+        if not is_healthy:
+            if not overcommitted:
+                print("Server failed to start.")
             server_proc.terminate()
+            server_proc.wait(timeout=5)
             continue
             
         static_mem = extract_base_memory(log_path)
         
         for ctx_size in context_sizes:
-            print(f"\n>> Running {ctx_size}-token context test (max generation ~20)...")
-            ok, ttft, tps = make_request_stream(prompt_len=ctx_size, max_tokens=20)
+            print(f"\n>> Running {ctx_size}-token context test (max generation ~2)...")
+            ok, ttft, tps = make_request_stream(prompt_len=ctx_size, max_tokens=2)
             
             # Wait for server to flush post-generation logs
             time.sleep(1)

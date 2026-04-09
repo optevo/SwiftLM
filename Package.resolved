@@ -33,7 +33,7 @@
       "location" : "https://github.com/SharpAI/mlx-swift.git",
       "state" : {
         "branch" : "main",
-        "revision" : "7bb740b5418e8f4abf900152f1d898c45c9fffc2"
+        "revision" : "6d3a11f3439aa21af1e07761778d4a9f466f8a8b"
       }
     },
     {
@@ -42,7 +42,7 @@
       "location" : "https://github.com/SharpAI/mlx-swift-lm.git",
       "state" : {
         "branch" : "main",
-        "revision" : "72cf2f7afdc47a1ddf74745388ee6e8dcb357d30"
+        "revision" : "b71fad20ff634df1024fcf4c81f4748907a4fa59"
       }
     },
     {
@@ -286,6 +286,15 @@
       "state" : {
         "revision" : "58c4bc11963a140358d791f678a60a2745a23146",
         "version" : "1.2.1"
+      }
+    },
+    {
+      "identity" : "swiftsoup",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/scinfu/SwiftSoup.git",
+      "state" : {
+        "revision" : "6c7915e16f729857aec3e99068c361e58a00ed68",
+        "version" : "2.13.4"
       }
     },
     {
