@@ -66,6 +66,12 @@ struct ModelPickerView: View {
             } message: {
                 Text("This model is large. Downloading over cellular may incur data charges.")
             }
+            .safeAreaInset(edge: .bottom) {
+                if let (modelId, progress) = downloadManager.activeDownloads.first {
+                    FloatingDownloadBanner(modelId: modelId, progress: progress)
+                        .padding(.vertical, 8)
+                }
+            }
         }
         .sheet(isPresented: $showHFSearch) {
             NavigationStack {
@@ -82,6 +88,12 @@ struct ModelPickerView: View {
                         Button("Cancel") { showHFSearch = false }
                             .foregroundStyle(SwiftBuddyTheme.accent)
                     }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if let (modelId, progress) = engine.downloadManager.activeDownloads.first {
+                    FloatingDownloadBanner(modelId: modelId, progress: progress)
+                        .padding(.vertical, 8)
                 }
             }
             .frame(minWidth: 600, minHeight: 600)
@@ -654,5 +666,58 @@ struct ModelRow: View {
             }
             .frame(width: 22, height: 22)
         }
+    }
+}
+
+// MARK: — Floating Download Banner
+
+struct FloatingDownloadBanner: View {
+    let modelId: String
+    let progress: ModelDownloadProgress
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .stroke(SwiftBuddyTheme.accent.opacity(0.2), lineWidth: 3)
+                Circle()
+                    .trim(from: 0, to: progress.fractionCompleted)
+                    .stroke(
+                        SwiftBuddyTheme.avatarGradient,
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .animation(.linear(duration: 0.3), value: progress.fractionCompleted)
+            }
+            .frame(width: 30, height: 30)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Downloading \(modelId.split(separator: "/").last ?? "")")
+                    .font(.system(.subheadline, design: .default, weight: .bold))
+                    .foregroundStyle(SwiftBuddyTheme.textPrimary)
+                    .lineLimit(1)
+
+                HStack {
+                    Text("\(Int(progress.fractionCompleted * 100))%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(SwiftBuddyTheme.textSecondary)
+
+                    if let speed = progress.speedMBps {
+                        Text("• \(String(format: "%.1f MB/s", speed))")
+                            .font(.caption)
+                            .foregroundStyle(SwiftBuddyTheme.textTertiary)
+                    }
+                }
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(SwiftBuddyTheme.accent.opacity(0.3), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.15), radius: 10, y: 5)
+        .padding(.horizontal)
     }
 }
