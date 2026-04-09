@@ -57,14 +57,22 @@ jobs:
           clang++ -std=c++17 -O2 -o /tmp/tq_test tests/test_turbo_quant.cpp
           /tmp/tq_test
 
+      - name: Build Test Harness
+        run: swift build --build-tests
+
       - name: Install MLX Metal library
         run: |
           python3 -m venv /tmp/mlx_venv
           /tmp/mlx_venv/bin/pip install --quiet mlx
+          
+          # Inject metallib for production e2e runner
           cp /tmp/mlx_venv/lib/python*/site-packages/mlx/lib/mlx.metallib .build/release/
+          
+          # Distribute metallib exclusively to XCTest bundles so it satisfies memory.cpp current_binary_dir() constraints natively.
+          find .build -type d -name "MacOS" -exec cp /tmp/mlx_venv/lib/python*/site-packages/mlx/lib/mlx.metallib {}/ \;
 
       - name: SwiftBuddy Tests (MemPalace & Lifecycle)
-        run: MLX_METAL_PATH=$PWD/.build/release/mlx.metallib swift test -c release --filter SwiftBuddyTests
+        run: swift test --skip-build --filter SwiftBuddyTests
 
       - name: Cache MLX model
         uses: actions/cache@v4
