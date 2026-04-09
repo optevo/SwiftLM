@@ -6,22 +6,19 @@ let package = Package(
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(name: "MLXInferenceCore", targets: ["MLXInferenceCore"]),
-        .executable(name: "SwiftLM", targets: ["SwiftLM"]),
-        .executable(name: "SwiftBuddy", targets: ["SwiftBuddy"])
+        .executable(name: "SwiftLM", targets: ["SwiftLM"])
     ],
     dependencies: [
         // Local Apple MLX Swift fork for C++ extensions
-        .package(path: "mlx-swift"),
+        .package(url: "https://github.com/SharpAI/mlx-swift.git", branch: "main"),
         // Apple's LLM library built on MLX Swift (SharpAI fork — with GPU/CPU layer partitioning)
-        .package(path: "mlx-swift-lm"),
+        .package(url: "https://github.com/SharpAI/mlx-swift-lm.git", branch: "main"),
         // HuggingFace tokenizers + model download
         .package(url: "https://github.com/huggingface/swift-transformers", .upToNextMinor(from: "1.2.0")),
         // Lightweight HTTP server (Apple-backed Swift server project)
         .package(url: "https://github.com/hummingbird-project/hummingbird", from: "2.0.0"),
         // Async argument parser (for CLI flags: --model, --port)
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
-        // SwiftSoup for HTML parsing
-        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.7.0"),
     ],
     targets: [
         // ── CLI HTTP server (macOS only) ──────────────────────────────
@@ -39,16 +36,6 @@ let package = Package(
             ],
             path: "Sources/SwiftLM"
         ),
-        // ── macOS GUI App (SwiftBuddy) ──────────────────────────────
-        .executableTarget(
-            name: "SwiftBuddy",
-            dependencies: [
-                "MLXInferenceCore",
-                .product(name: "Hummingbird", package: "hummingbird"),
-                .product(name: "SwiftSoup", package: "SwiftSoup"),
-            ],
-            path: "SwiftBuddy/SwiftBuddy"
-        ),
         // ── Shared inference library for SwiftLM Chat (iOS + macOS) ──
         .target(
             name: "MLXInferenceCore",
@@ -65,10 +52,5 @@ let package = Package(
                 .enableExperimentalFeature("StrictConcurrency")
             ]
         ),
-        // ── Automated Test Harness ──────────────────────────────────
-        .testTarget(
-            name: "SwiftBuddyTests",
-            dependencies: ["SwiftBuddy", "MLXInferenceCore"]
-        )
     ]
 )
