@@ -20,6 +20,7 @@ struct RootView: View {
     @State private var showSettings = false
     @State private var showMap = false
     @State private var showTextIngestion = false
+    @State private var showInspector = true
 
     enum Tab { case chat, models, palace, miner, settings }
 
@@ -242,21 +243,23 @@ struct RootView: View {
             }
             .frame(minWidth: 220)
             .background(SwiftBuddyTheme.background)
-        } content: {
+        } detail: {
             ChatView(
                 viewModel: viewModel,
                 showSettings: $showSettings,
-                showModelPicker: $showModelPicker
+                showModelPicker: $showModelPicker,
+                showInspector: $showInspector
             )
             .frame(minWidth: 400)
             .background(SwiftBuddyTheme.background)
             .navigationTitle("Chat")
-        } detail: {
-            InspectorView(
-                showModelPicker: $showModelPicker
-            )
-            .frame(minWidth: 250)
-            .background(SwiftBuddyTheme.background)
+            .inspector(isPresented: $showInspector) {
+                InspectorView(
+                    showModelPicker: $showModelPicker
+                )
+                .inspectorColumnWidth(min: 250, ideal: 275, max: 350)
+                .background(SwiftBuddyTheme.background)
+            }
         }
     }
 

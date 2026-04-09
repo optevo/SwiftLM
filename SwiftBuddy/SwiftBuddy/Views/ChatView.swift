@@ -13,6 +13,7 @@ struct ChatView: View {
     // macOS-only sheet control (iOS: these are tabs)
     var showSettings: Binding<Bool>? = nil
     var showModelPicker: Binding<Bool>? = nil
+    var showInspector: Binding<Bool>? = nil
 
     @State private var inputText = ""
     @FocusState private var inputFocused: Bool
@@ -420,6 +421,16 @@ struct ChatView: View {
         ToolbarItem {
             Button { showSettings?.wrappedValue = true } label: {
                 Label("Settings", systemImage: "slider.horizontal.3")
+            }
+        }
+        
+        if showInspector != nil {
+            ToolbarItem {
+                Button { 
+                    withAnimation { showInspector?.wrappedValue.toggle() }
+                } label: {
+                    Label("Toggle Inspector", systemImage: "sidebar.right")
+                }
             }
         }
     }
