@@ -12,29 +12,13 @@ fi
 APP_NAME=$(basename "$APP_PATH")
 
 echo "=========================================="
-echo "1. Zip the App for Notarization"
+echo "1. Applying Ad-Hoc open-source signature"
 echo "=========================================="
-ZIP_PATH="/tmp/${APP_NAME}.zip"
-/usr/bin/ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+# Force a local ad-hoc signature so the binary structure is valid for macOS execution locally
+codesign --force --deep --sign - "$APP_PATH"
 
 echo "=========================================="
-echo "2. Submit to Apple Notary Service"
-echo "=========================================="
-# Submit and wait for the result
-xcrun notarytool submit "$ZIP_PATH" \
-    --apple-id "$APPLEID_USERNAME" \
-    --password "$APPLEID_PASSWORD" \
-    --team-id "$APPLE_TEAM_ID" \
-    --wait
-
-echo "=========================================="
-echo "3. Staple the Notarization Ticket"
-echo "=========================================="
-# Staple it so it can pass Gatekeeper even offline
-xcrun stapler staple "$APP_PATH"
-
-echo "=========================================="
-echo "4. Package into DMG"
+echo "2. Package Ad-Hoc build into DMG"
 echo "=========================================="
 mkdir -p output
 DMG_NAME="SwiftBuddy-macOS.dmg"
@@ -52,5 +36,5 @@ create-dmg \
   "$APP_PATH"
 
 echo "=========================================="
-echo "SUCCESS! Created notarized output/$DMG_NAME"
+echo "SUCCESS! Created UNSIGNED (Ad-Hoc) output/$DMG_NAME"
 echo "=========================================="

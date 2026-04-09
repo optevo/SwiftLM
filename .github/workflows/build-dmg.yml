@@ -1,4 +1,4 @@
-name: Build macOS DMG
+name: Build macOS DMG (Ad-Hoc)
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ on:
       - 'scripts/build_dmg.sh'
 
 jobs:
-  build-and-sign:
+  build-and-package:
     runs-on: macos-15
     steps:
       - name: Checkout Repository
@@ -19,90 +19,33 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup Apple Certificates
-        env:
-          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
-          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
-          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      - name: Build Ad-Hoc App
         run: |
-          # Create variables
-          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
-          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-
-          # Import certificate and provisioning profile from secrets
-          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
-          
-          if [ -n "$BUILD_PROVISION_PROFILE_BASE64" ]; then
-            echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o $PP_PATH
-            mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-            cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
-          fi
-
-          # Create temporary keychain
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-
-          # Import certificate to keychain
-          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
-
-          # Apply keychain authorization
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          
-      - name: Create ExportOptions.plist
-        run: |
-          cat << 'EOF' > ExportOptions.plist
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>developer-id</string>
-              <key>teamID</key>
-              <string>${{ secrets.APPLE_TEAM_ID }}</string>
-              <key>destination</key>
-              <string>export</string>
-          </dict>
-          </plist>
-          EOF
-
-      - name: Build and Archive
-        run: |
-          # To ensure we build for mac architecture efficiently
-          xcodebuild archive \
+          # Build the raw unsigned .app binary directly to bypass xcodebuild archive restrictions
+          xcodebuild clean build \
             -project SwiftBuddy/SwiftBuddy.xcodeproj \
             -scheme SwiftBuddy \
             -destination "generic/platform=macOS" \
             -configuration Release \
-            -archivePath $RUNNER_TEMP/SwiftBuddy.xcarchive \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Developer ID Application"
-            
-      - name: Export App
-        run: |
-          xcodebuild -exportArchive \
-            -archivePath $RUNNER_TEMP/SwiftBuddy.xcarchive \
-            -exportOptionsPlist ExportOptions.plist \
-            -exportPath $RUNNER_TEMP/Exported
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            CODE_SIGNING_ALLOWED=NO \
+            TARGET_BUILD_DIR="$RUNNER_TEMP/build" \
+            BUILT_PRODUCTS_DIR="$RUNNER_TEMP/build"
             
       - name: Install macOS Packaging Tools
         run: brew install create-dmg
 
-      - name: Package Notarized DMG
-        env:
-          APPLEID_USERNAME: ${{ secrets.APPLEID_USERNAME }}
-          APPLEID_PASSWORD: ${{ secrets.APPLEID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Package Ad-Hoc DMG
         run: |
           chmod +x scripts/build_dmg.sh
-          ./scripts/build_dmg.sh "$RUNNER_TEMP/Exported/SwiftBuddy.app"
+          # The built .app is sitting right in our designated output directory
+          ./scripts/build_dmg.sh "$RUNNER_TEMP/build/SwiftBuddy.app"
 
       - name: Upload DMG Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwiftBuddy-macOS
+          name: SwiftBuddy-macOS-Unsigned
           path: output/*.dmg
           retention-days: 14
