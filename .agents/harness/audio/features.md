@@ -42,10 +42,10 @@ SwiftLM currently has zero audio support. This harness defines the TDD contract 
 
 | # | Feature | Status | Test | Last Verified |
 |---|---------|--------|------|---------------|
-| 13 | Gemma 4 `audio_config` is parsed from config.json | 🔲 TODO | `testAudio_Gemma4ConfigParsed` | — |
-| 14 | Audio tokens interleaved with text tokens at correct positions | 🔲 TODO | `testAudio_TokenInterleaving` | — |
-| 15 | `boa_token_id` / `eoa_token_id` correctly bracket audio segments | 🔲 TODO | `testAudio_AudioTokenBoundaries` | — |
-| 16 | Mixed text + audio + vision request processed without crash | 🔲 TODO | `testAudio_TrimodalRequest` | — |
+| 13 | Gemma 4 `audio_config` is parsed from config.json | ✅ DONE | `testAudio_Gemma4ConfigParsed` | 2026-04-10 |
+| 14 | Audio tokens interleaved with text tokens at correct positions | ✅ DONE | `testAudio_TokenInterleaving` | 2026-04-10 |
+| 15 | `boa_token_id` / `eoa_token_id` correctly bracket audio segments | ✅ DONE | `testAudio_AudioTokenBoundaries` | 2026-04-10 |
+| 16 | Mixed text + audio + vision request processed without crash | ✅ DONE | `testAudio_TrimodalRequest` | 2026-04-10 |
 
 ### Phase 4 — Text-to-Speech (TTS) Output
 
