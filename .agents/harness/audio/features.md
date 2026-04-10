@@ -51,7 +51,7 @@ SwiftLM currently has zero audio support. This harness defines the TDD contract 
 
 | # | Feature | Status | Test | Last Verified |
 |---|---------|--------|------|---------------|
-| 17 | `/v1/audio/speech` endpoint accepts text input | 🔲 TODO | `testAudio_TTSEndpointAccepts` | — |
-| 18 | TTS vocoder generates valid PCM waveform from tokens | 🔲 TODO | `testAudio_VocoderOutput` | — |
-| 19 | Generated WAV has valid header and is playable | 🔲 TODO | `testAudio_ValidWAVOutput` | — |
-| 20 | Streaming audio chunks sent as Server-Sent Events | 🔲 TODO | `testAudio_StreamingTTSOutput` | — |
+| 17 | `/v1/audio/speech` endpoint accepts text input | ✅ DONE | `testAudio_TTSEndpointAccepts` | 2026-04-10 |
+| 18 | TTS vocoder generates valid PCM waveform from tokens | ✅ DONE | `testAudio_VocoderOutput` | 2026-04-10 |
+| 19 | Generated WAV has valid header and is playable | ✅ DONE | `testAudio_ValidWAVOutput` | 2026-04-10 |
+| 20 | Streaming audio chunks sent as Server-Sent Events | ✅ DONE | `testAudio_StreamingTTSOutput` | 2026-04-10 |

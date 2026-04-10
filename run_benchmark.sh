@@ -290,11 +290,11 @@ if [ "$suite_opt" == "5" ]; then
     mkdir -p tmp
     AUDIO_PATH="./tmp/audio_test"
     # Small test audio clip (we assume standard tools and curl).
-    curl -sL "https://cdn.freesound.org/previews/16/16287_35552-lq.mp3" -o "${AUDIO_PATH}.mp3" 
+    curl -sL "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" -o "${AUDIO_PATH}.mp3" 
     
     echo "Converting MP3 to WAV for engine pipeline ingestion..."
     # afconvert converts mp3 to standardized WAV under macOS natively without ffmpeg dependencies
-    afconvert -f WAVE -d pcm16 "${AUDIO_PATH}.mp3" "${AUDIO_PATH}.wav" 
+    afconvert -f WAVE -d LEI16 "${AUDIO_PATH}.mp3" "${AUDIO_PATH}.wav" 
     
     if [ ! -f "${AUDIO_PATH}.wav" ]; then
         echo "Failed to convert audio via afconvert."
