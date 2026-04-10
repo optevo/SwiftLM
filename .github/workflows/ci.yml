@@ -62,14 +62,11 @@ jobs:
       - name: SwiftBuddy Tests (MemPalace & Lifecycle)
         run: swift test --skip-build --filter SwiftBuddyTests --disable-swift-testing
 
-      - name: Archive SwiftLM Release Architecture
-        run: tar -czf release-architecture.tar.gz .build/release
-
       - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4
         with:
           name: swiftlm-architecture
-          path: release-architecture.tar.gz
+          path: .build/release/
           retention-days: 1
 
   integration_matrix:
@@ -89,12 +86,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: swiftlm-architecture
-          path: .
+          path: .build/release/
           
-      - name: Restore Architecture
-        run: |
-          tar -xzf release-architecture.tar.gz
-          chmod +x .build/release/SwiftLM
+      - name: Restore Architecture Privileges
+        run: chmod +x .build/release/SwiftLM
 
       - name: Cache MLX model
         uses: actions/cache@v4
