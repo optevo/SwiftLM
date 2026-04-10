@@ -1,4 +1,4 @@
-### `baa-ai/GLM-5.1-RAM-270GB-MLX` — Context & Memory Profile
+### `mlx-community/Qwen3.5-7B-Instruct-4bit` — Context & Memory Profile
 
 Context depths tested: 512,40000,100000
 

@@ -36,7 +36,7 @@ SwiftLM currently has zero audio support. This harness defines the TDD contract 
 | 9 | Whisper encoder produces valid hidden states from mel input | ✅ DONE | `testAudio_WhisperEncoderOutput` | 2026-04-10 |
 | 10 | Whisper decoder generates token sequence from encoder output | ✅ DONE | `testAudio_WhisperDecoderOutput` | 2026-04-10 |
 | 11 | `/v1/audio/transcriptions` endpoint returns JSON with text field | ✅ DONE | `testAudio_TranscriptionEndpoint` | 2026-04-10 |
-| 12 | Transcription of known fixture WAV matches expected text | 🔲 TODO | `testAudio_TranscriptionAccuracy` | — |
+| 12 | Transcription of known fixture WAV matches expected text | ✅ DONE | `testAudio_TranscriptionAccuracy` | 2026-04-10 |
 
 ### Phase 3 — Multimodal Audio Fusion
 
