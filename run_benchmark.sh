@@ -28,13 +28,14 @@ if [ "$suite_opt" == "0" ]; then
         echo ""
         echo ">>> Executing Test Suite $TEST_ID <<<"
         
-        # We manually select a safe fallback model for automated runs
-        MODEL="Qwen2.5-7B-Instruct-4bit"
+        # We dynamically fetch the highest downloaded 4-bit model to completely avoid hardcoded generations boundary shifts
+        MODEL=$(python3 scripts/hf_discovery.py "mlx-community/Qwen 4bit" || echo "Qwen2.5-7B-Instruct-4bit")
+        
         if [ "$TEST_ID" == "4" ]; then
-            MODEL="mlx-community/Qwen2-VL-2B-Instruct-4bit"
+            MODEL=$(python3 scripts/hf_discovery.py "mlx-community/Qwen VL 4bit" || echo "mlx-community/Qwen2-VL-2B-Instruct-4bit")
         fi
         if [ "$TEST_ID" == "5" ]; then
-            MODEL="gemma-4-e4b-it-8bit"
+            MODEL=$(python3 scripts/hf_discovery.py "mlx-community/gemma 8bit" || echo "gemma-4-e4b-it-8bit")
         fi
         
         echo -e "$TEST_ID\n11\n$MODEL" | ./run_benchmark.sh
