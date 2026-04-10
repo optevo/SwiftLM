@@ -218,6 +218,31 @@ curl http://localhost:5413/v1/chat/completions \
 ```
 ---
 
+### Vision-Language Models (VLM)
+To run a vision model (e.g., `mlx-community/Qwen2-VL-2B-Instruct-4bit`), launch SwiftLM with the `--vision` flag:
+```bash
+./.build/release/SwiftLM --model mlx-community/Qwen2-VL-2B-Instruct-4bit --vision
+```
+
+You can then pass standard OpenAI base64 encoded images directly. SwiftLM handles hardware spatial-mapping natively via Metal:
+```bash
+curl http://localhost:5413/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2-vl",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "Describe the contents of this image."},
+          {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ..."}}
+        ]
+      }
+    ]
+  }'
+```
+---
+
 
 ## ⚙️ CLI Options
 
