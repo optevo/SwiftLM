@@ -59,13 +59,28 @@ fi
 
 # ── Test ALM ──────────────────────────────────────────────────────────
 mkdir -p /tmp/audio_test
-curl -sL "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" -o /tmp/audio_test/test.mp3
-afconvert -f WAVE -d LEI16 /tmp/audio_test/test.mp3 /tmp/audio_test/test.wav
+
+cat << 'EOF' > /tmp/audio_test/gen.py
+import wave, struct, math
+with wave.open('/tmp/audio_test/test.wav', 'w') as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(16000)
+    for i in range(16000):
+        v = int(math.sin(i * 440.0 * 2.0 * math.pi / 16000.0) * 10000.0)
+        w.writeframes(struct.pack('<h', v))
+EOF
+python3 /tmp/audio_test/gen.py
+
 BASE64_AUDIO=$(base64 -i /tmp/audio_test/test.wav | tr -d '\n')
+
+cat <<EOF > /tmp/audio_test/payload.json
+{"model":"$MODEL","max_tokens":100,"messages":[{"role":"user","content":[{"type":"text","text":"Transcribe this audio strictly."},{"type":"input_audio","input_audio":{"data":"${BASE64_AUDIO}","format":"wav"}}]}]}
+EOF
 
 COMPLETION=$(curl -sf -X POST "$URL/v1/chat/completions" \
     -H "Content-Type: application/json" \
-    -d "{\"model\":\"$MODEL\",\"max_tokens\":100,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Transcribe this audio strictly.\"},{\"type\":\"input_audio\",\"input_audio\":{\"data\":\"${BASE64_AUDIO}\",\"format\":\"wav\"}}]}]}")
+    -d @"/tmp/audio_test/payload.json")
 
 if echo "$COMPLETION" | jq -e '.choices[0].message.content' >/dev/null 2>&1; then
     CONTENT=$(echo "$COMPLETION" | jq -r '.choices[0].message.content')
