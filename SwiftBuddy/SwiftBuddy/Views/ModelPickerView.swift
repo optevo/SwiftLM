@@ -15,6 +15,7 @@ struct ModelPickerView: View {
     @State private var device = DeviceProfile.current
     @State private var showManagement = false
     @State private var pendingCellularModelId: String? = nil
+    @State private var deletionError: String? = nil
 
     private var downloadManager: ModelDownloadManager { engine.downloadManager }
 
@@ -26,7 +27,8 @@ struct ModelPickerView: View {
                     device: device,
                     onTap: handleModelTap,
                     showManagement: $showManagement,
-                    onSearchHFTap: { showHFSearch = true }
+                    onSearchHFTap: { showHFSearch = true },
+                    onDeleteModel: deleteModel
                 )
             }
             .navigationTitle("Models")
@@ -72,6 +74,14 @@ struct ModelPickerView: View {
                         .padding(.vertical, 8)
                 }
             }
+            .alert("Deletion Error", isPresented: Binding(
+                get: { deletionError != nil },
+                set: { if !$0 { deletionError = nil } }
+            ), actions: {
+                Button("OK") { deletionError = nil }
+            }, message: {
+                Text(deletionError ?? "")
+            })
         }
         .sheet(isPresented: $showHFSearch) {
             NavigationStack {
@@ -109,6 +119,18 @@ struct ModelPickerView: View {
             onSelect(modelId)
         }
     }
+
+    private func deleteModel(_ modelId: String) {
+        do {
+            if case .ready(let id) = engine.state, id == modelId {
+                engine.unload()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+            }
+            try downloadManager.delete(modelId)
+        } catch {
+            deletionError = error.localizedDescription
+        }
+    }
 }
 
 enum CatalogCategory: String, CaseIterable, Identifiable {
@@ -124,6 +146,7 @@ private struct CatalogTab: View {
     let onTap: (String) -> Void
     @Binding var showManagement: Bool
     let onSearchHFTap: () -> Void
+    let onDeleteModel: (String) -> Void
 
     @State private var selectedCategory: CatalogCategory? = .staffPicks
 
@@ -150,7 +173,7 @@ private struct CatalogTab: View {
                             } else {
                                 ForEach(downloadManager.downloadedModels) { downloaded in
                                     let entry = ModelCatalog.all.first(where: { $0.id == downloaded.id }) ?? ModelEntry(id: downloaded.id, displayName: String(downloaded.id.split(separator: "/").last ?? ""), parameterSize: "Hub Model", quantization: "Native", ramRequiredGB: 0, ramRecommendedGB: 0)
-                                    ModelCard(model: entry, downloadStatus: .downloaded(sizeString: downloaded.displaySize), fitStatus: ModelCatalog.fitStatus(for: entry, on: device), downloadProgress: downloadManager.activeDownloads[entry.id], onTap: { onTap(entry.id) }, onDelete: { try? downloadManager.delete(entry.id) })
+                                    ModelCard(model: entry, downloadStatus: .downloaded(sizeString: downloaded.displaySize), fitStatus: ModelCatalog.fitStatus(for: entry, on: device), downloadProgress: downloadManager.activeDownloads[entry.id], onTap: { onTap(entry.id) }, onDelete: { onDeleteModel(entry.id) })
                                 }
                             }
                         case .staffPicks:

@@ -19,11 +19,12 @@ struct RootView: View {
     // macOS sheets
     @State private var showModelPicker = false
     @State private var showSettings = false
+    @State private var showPersonaDiscovery = false
     @State private var showMap = false
+    @State private var showMindPalace = false
     @State private var showTextIngestion = false
-    @State private var showInspector = true
-
-    enum Tab { case chat, models, palace, miner, settings }
+    @State private var showModelManagement = false
+    enum Tab { case chat, models, palace, mindPalace, miner, settings }
 
     var body: some View {
         Group {
@@ -44,12 +45,29 @@ struct RootView: View {
                     PalaceVisualizerView()
                         .frame(width: 800, height: 600)
                 }
+                .sheet(isPresented: $showMindPalace) {
+                    MindPalaceView()
+                        .frame(minWidth: 800, minHeight: 600)
+                }
                 .sheet(isPresented: $showTextIngestion) {
                     TextIngestionView()
                         .environmentObject(engine)
                 }
+                .sheet(isPresented: $showModelManagement) {
+                    ModelManagementView()
+                        .environmentObject(engine)
+                }
                 .onReceive(NotificationCenter.default.publisher(for: .showModelPicker)) { _ in
                     showModelPicker = true
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .showTextIngestion)) { _ in
+                    showTextIngestion = true
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .showModelManagement)) { _ in
+                    showModelManagement = true
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .showPersonaDiscovery)) { _ in
+                    showPersonaDiscovery = true
                 }
                 .onAppear {
                     viewModel.engine = engine
@@ -112,6 +130,32 @@ struct RootView: View {
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
+                                
+                                Button {
+                                    Task {
+                                        registry.lastSyncLog = "RE-SYNTHESIZING \(wing.name)..."
+                                        registry.isSyncing = true
+                                        try? await GraphPalaceService.shared.buildRelationalGraph(wingName: wing.name, using: engine) { current, total, text in
+                                            Task { @MainActor in
+                                                registry.extractionProcessed = current
+                                                registry.extractionTotal = total
+                                                registry.currentChunkText = text
+                                            }
+                                        }
+                                        try? await GraphPalaceService.shared.synthesizePersonaIndex(wingName: wing.name, using: engine) { current, total, text in
+                                            Task { @MainActor in
+                                                registry.extractionProcessed = current
+                                                registry.extractionTotal = total
+                                                registry.currentChunkText = text
+                                            }
+                                        }
+                                        registry.lastSyncLog = "Finished processing \(wing.name)!"
+                                        registry.isSyncing = false
+                                    }
+                                } label: {
+                                    Label("Synthesize Graph", systemImage: "network")
+                                }
+                                .tint(.purple)
                             }
                         }
                     }
@@ -143,9 +187,18 @@ struct RootView: View {
                 PalaceVisualizerView()
             }
             .tabItem {
-                Label("Palace", systemImage: selectedTab == .palace ? "brain.head.profile" : "brain")
+                Label("Memory Map", systemImage: selectedTab == .palace ? "brain.head.profile" : "brain")
             }
             .tag(Tab.palace)
+            
+            // ── Mind Palace Graph ───────────────────────────────────────
+            NavigationStack {
+                MindPalaceView()
+            }
+            .tabItem {
+                Label("Mind Palace", systemImage: "network")
+            }
+            .tag(Tab.mindPalace)
             
             // ── Miner Tab ──────────────────────────────────────────────
             NavigationStack {
@@ -211,19 +264,17 @@ struct RootView: View {
                                 .foregroundStyle(.orange)
                         }
                         .buttonStyle(.plain)
-                    }
-                    
-                    Section("Tools") {
+                        
                         Button {
-                            showTextIngestion = true
+                            showMindPalace = true
                         } label: {
-                            Label("Text Ingestion", systemImage: "hammer.fill")
-                                .foregroundStyle(SwiftBuddyTheme.cyan)
+                            Label("Mind Palace", systemImage: "network")
+                                .foregroundStyle(.purple)
                         }
                         .buttonStyle(.plain)
                     }
                     
-                    Section("Friends (Personas)") {
+                    Section {
                         ForEach(wings) { wing in
                             Button {
                                 viewModel.currentWing = wing.name
@@ -233,6 +284,31 @@ struct RootView: View {
                             }
                             .buttonStyle(.plain)
                             .contextMenu {
+                                Button {
+                                    Task {
+                                        registry.lastSyncLog = "RE-SYNTHESIZING \(wing.name)..."
+                                        registry.isSyncing = true
+                                        try? await GraphPalaceService.shared.buildRelationalGraph(wingName: wing.name, using: engine) { current, total, text in
+                                            Task { @MainActor in
+                                                registry.extractionProcessed = current
+                                                registry.extractionTotal = total
+                                                registry.currentChunkText = text
+                                            }
+                                        }
+                                        try? await GraphPalaceService.shared.synthesizePersonaIndex(wingName: wing.name, using: engine) { current, total, text in
+                                            Task { @MainActor in
+                                                registry.extractionProcessed = current
+                                                registry.extractionTotal = total
+                                                registry.currentChunkText = text
+                                            }
+                                        }
+                                        registry.lastSyncLog = "Finished processing \(wing.name)!"
+                                        registry.isSyncing = false
+                                    }
+                                } label: {
+                                    Label("Re-Synthesize Graph", systemImage: "network")
+                                }
+                                
                                 Button(role: .destructive) {
                                     modelContext.delete(wing)
                                     try? modelContext.save()
@@ -240,6 +316,19 @@ struct RootView: View {
                                     Label("Delete Persona", systemImage: "trash")
                                 }
                             }
+                        }
+                    } header: {
+                        HStack {
+                            Text("Friends (Personas)")
+                            Spacer()
+                            Button {
+                                showPersonaDiscovery = true
+                            } label: {
+                                Image(systemName: "plus")
+                                    .foregroundStyle(SwiftBuddyTheme.accent)
+                                    .padding(.top, 4)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -253,52 +342,45 @@ struct RootView: View {
             ChatView(
                 viewModel: viewModel,
                 showSettings: $showSettings,
-                showModelPicker: $showModelPicker,
-                showInspector: $showInspector
+                showModelPicker: $showModelPicker
             )
             .frame(minWidth: 400)
             .background(SwiftBuddyTheme.background)
             .navigationTitle("Chat")
-            .inspector(isPresented: $showInspector) {
-                InspectorView(
-                    showModelPicker: $showModelPicker
-                )
-                .inspectorColumnWidth(min: 250, ideal: 275, max: 350)
-                .background(SwiftBuddyTheme.background)
+            .sheet(isPresented: $showPersonaDiscovery) {
+                PersonaDiscoveryView(registry: registry)
             }
         }
     }
 
-    // Branded header — bolt icon + SwiftBuddy wordmark + version chip
+    // Branded header — gear icon (settings trigger) + SwiftBuddy wordmark
     private var sidebarHeader: some View {
         HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(SwiftBuddyTheme.heroGradient)
-                    .frame(width: 32, height: 32)
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
+            Button {
+                showSettings = true
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(SwiftBuddyTheme.heroGradient)
+                        .frame(width: 32, height: 32)
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .shadow(color: SwiftBuddyTheme.accent.opacity(0.40), radius: 6)
             }
-            .shadow(color: SwiftBuddyTheme.accent.opacity(0.40), radius: 6)
+            .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("SwiftBuddy")
                     .font(.system(.subheadline, weight: .bold))
                     .foregroundStyle(SwiftBuddyTheme.textPrimary)
-                Text("Chat")
+                Text("Configuration")
                     .font(.caption2)
                     .foregroundStyle(SwiftBuddyTheme.textTertiary)
             }
 
             Spacer()
-
-            Text("v1.0")
-                .font(.system(size: 9, weight: .bold))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(SwiftBuddyTheme.accent.opacity(0.18), in: Capsule())
-                .foregroundStyle(SwiftBuddyTheme.accent)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -354,6 +436,17 @@ struct RootView: View {
                     .font(.caption)
                     .foregroundStyle(SwiftBuddyTheme.textSecondary)
                     .lineLimit(1)
+                
+                Spacer()
+                
+                Button {
+                    showModelManagement = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.caption)
+                        .foregroundStyle(SwiftBuddyTheme.textTertiary)
+                }
+                .buttonStyle(.plain)
             }
 
         case .generating:
@@ -381,6 +474,7 @@ struct RootView: View {
 
 struct PersonaExtractionOverlay: View {
     @ObservedObject var registry: RegistryService
+    @StateObject private var monitor = SystemMonitorService.shared
     @State private var isBlinking = false
     
     var body: some View {
@@ -415,7 +509,16 @@ struct PersonaExtractionOverlay: View {
                 
                 Divider().background(Color.green.opacity(0.5))
                 
-                // Active Extraction Telemetry 
+                // Hardware Telemetry
+                HStack(spacing: 20) {
+                    Text("CPU: \(String(format: "%.0f%%", monitor.cpuLoad * 100))")
+                    Text("SYS MEM: \(formatBytes(monitor.memoryUsedBytes))")
+                    Text("GPU MAP: \(formatBytes(monitor.vramUsedBytes))")
+                }
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(.green.opacity(0.8))
+                
+                // Active Extraction Telemetry
                 VStack(alignment: .leading, spacing: 10) {
                     Text("> \(registry.lastSyncLog.uppercased())")
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
@@ -486,9 +589,18 @@ struct PersonaExtractionOverlay: View {
                     .fill(Color.black.opacity(0.9))
                     .border(Color.green.opacity(0.6), width: 2)
             )
-            .shadow(color: .green.opacity(0.3), radius: 20, x: 0, y: 0)
-            .frame(maxWidth: 600)
+            .frame(maxWidth: 600, maxHeight: 400)
+            .shadow(color: .green.opacity(0.4), radius: 20, x: 0, y: 0)
         }
         .zIndex(100)
+    }
+    
+    private func formatBytes(_ bytes: UInt64) -> String {
+        let gb = Double(bytes) / (1024 * 1024 * 1024)
+        if gb >= 1.0 {
+            return String(format: "%.1f GB", gb)
+        }
+        let mb = Double(bytes) / (1024 * 1024)
+        return String(format: "%.0f MB", mb)
     }
 }

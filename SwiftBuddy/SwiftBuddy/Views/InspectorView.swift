@@ -15,6 +15,10 @@ struct InspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 
+                // MARK: - Telemetry Dashboard
+                ResourceDashboardView()
+                    .padding(.bottom, 10)
+                
                 // MARK: - API Server Status
                 Section {
                     VStack(alignment: .leading, spacing: 10) {
@@ -143,7 +147,7 @@ struct InspectorView: View {
                                         .font(.subheadline)
                                     Spacer()
                                     Button("Install") {
-                                        Task { await registryService.downloadPersona(name: personaName) }
+                                        Task { await registryService.downloadPersona(name: personaName, using: engine) }
                                     }
                                     .buttonStyle(.borderedProminent)
                                     .controlSize(.mini)

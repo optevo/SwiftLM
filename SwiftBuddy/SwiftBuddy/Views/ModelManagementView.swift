@@ -309,23 +309,29 @@ struct ModelManagementView: View {
 
     private func deleteModel(_ modelId: String) {
         do {
-            try dm.delete(modelId)
-            // If we deleted the currently loaded model, unload it
+            // Unload the currently loaded model BEFORE attempting filesystem deletion
+            // This releases MLX mmap file locks, preventing macOS from throwing Access/IO errors.
             if case .ready(let id) = engine.state, id == modelId {
                 engine.unload()
+                // Yield the main thread to ensure deallocation completes
+                RunLoop.main.run(until: Date().addingTimeInterval(0.2))
             }
+            try dm.delete(modelId)
         } catch {
             deletionError = error.localizedDescription
         }
     }
 
     private func deleteAllModels() {
+        // Unload first to free mmap file locks
+        if case .ready = engine.state {
+            engine.unload()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        }
+        
         let ids = dm.downloadedModels.map { $0.id }
         for id in ids {
             try? dm.delete(id)
-        }
-        if case .ready = engine.state {
-            engine.unload()
         }
     }
 

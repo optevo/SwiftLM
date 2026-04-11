@@ -13,8 +13,6 @@ struct ChatView: View {
     // macOS-only sheet control (iOS: these are tabs)
     var showSettings: Binding<Bool>? = nil
     var showModelPicker: Binding<Bool>? = nil
-    var showInspector: Binding<Bool>? = nil
-
     @State private var inputText = ""
     @FocusState private var inputFocused: Bool
 
@@ -282,18 +280,6 @@ struct ChatView: View {
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 10) {
             
-            if !viewModel.messages.isEmpty {
-                Button(action: {
-                    withAnimation { viewModel.newConversation() }
-                }) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 19))
-                        .foregroundStyle(SwiftBuddyTheme.textSecondary)
-                        .padding(.bottom, 12)
-                }
-                .buttonStyle(.plain)
-            }
-            
             // Text field with frosted glass pill
             HStack(alignment: .bottom) {
                 TextField(viewModel.currentWing != nil ? "Message \(viewModel.currentWing!)..." : "Message", text: $inputText, axis: .vertical)
@@ -406,11 +392,11 @@ struct ChatView: View {
             }
         }
         
-        // New conversation
+        // Clear Conversation
         ToolbarItem(placement: .topBarTrailing) {
-            Button { viewModel.newConversation() } label: {
-                Image(systemName: "square.and.pencil")
-                    .foregroundStyle(SwiftBuddyTheme.accent)
+            Button { withAnimation { viewModel.clearHistory() } } label: {
+                Image(systemName: "trash")
+                    .foregroundStyle(SwiftBuddyTheme.textSecondary)
             }
         }
     }
@@ -455,8 +441,8 @@ struct ChatView: View {
         }
         
         ToolbarItem {
-            Button { viewModel.newConversation() } label: {
-                Label("New Chat", systemImage: "square.and.pencil")
+            Button { withAnimation { viewModel.clearHistory() } } label: {
+                Label("Clear Chat", systemImage: "trash")
             }
         }
         ToolbarItem {
@@ -465,15 +451,6 @@ struct ChatView: View {
             }
         }
         
-        if showInspector != nil {
-            ToolbarItem {
-                Button { 
-                    withAnimation { showInspector?.wrappedValue.toggle() }
-                } label: {
-                    Label("Toggle Inspector", systemImage: "sidebar.right")
-                }
-            }
-        }
     }
     #endif
 }

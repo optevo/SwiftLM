@@ -24,6 +24,80 @@ struct SettingsView: View {
             SwiftBuddyTheme.background.ignoresSafeArea()
 
             Form {
+                // ── System Engine ─────────────────────────────────────────────
+                Section {
+                    Button {
+                        NotificationCenter.default.post(name: .showModelPicker, object: nil)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Label("Model Configuration", systemImage: "cpu.fill")
+                                .foregroundStyle(SwiftBuddyTheme.textPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(SwiftBuddyTheme.textSecondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        NotificationCenter.default.post(name: .showTextIngestion, object: nil)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Label("Text Ingestion Miner", systemImage: "hammer.fill")
+                                .foregroundStyle(SwiftBuddyTheme.textPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(SwiftBuddyTheme.textSecondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        NotificationCenter.default.post(name: .showModelManagement, object: nil)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Label("Manage Downloaded Models", systemImage: "externaldrive.badge.minus")
+                                .foregroundStyle(SwiftBuddyTheme.textPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(SwiftBuddyTheme.textSecondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        NotificationCenter.default.post(name: .showPersonaDiscovery, object: nil)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Label("Discover Personas", systemImage: "person.crop.circle.badge.plus")
+                                .foregroundStyle(SwiftBuddyTheme.textPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(SwiftBuddyTheme.textSecondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    
+                    HStack(spacing: 6) {
+                        Label("API Server", systemImage: "network")
+                            .foregroundStyle(SwiftBuddyTheme.textPrimary)
+                        Spacer()
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 8, height: 8)
+                        Text("Port 8080")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    sectionLabel("System Engine", icon: "server.rack")
+                }
+
                 // ── Generation ────────────────────────────────────────────────
                 Section {
                     temperatureRow
@@ -110,6 +184,9 @@ struct SettingsView: View {
                     sectionLabel("About", icon: "info.circle")
                 }
             }
+            #if os(macOS)
+            .formStyle(.grouped)
+            #endif
             .scrollContentBackground(.hidden)
         }
         .navigationTitle("Settings")

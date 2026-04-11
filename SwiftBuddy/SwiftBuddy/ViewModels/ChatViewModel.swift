@@ -238,6 +238,20 @@ final class ChatViewModel: ObservableObject {
         }
     }
     
+    func clearHistory() {
+        stopGeneration()
+        messages.removeAll()
+        if let context = modelContext, let session = activeSession {
+            // Delete all stored turns for this session
+            for turn in session.turns {
+                context.delete(turn)
+            }
+            try? context.save()
+            // Reset the loaded session state so we start fresh
+            session.turns.removeAll()
+        }
+    }
+    
     // MARK: - Tool Calling & Context Injection
     public func buildIdentityPayload(userText: String = "") async -> String {
         var wakeUpText = ""
@@ -246,14 +260,13 @@ final class ChatViewModel: ObservableObject {
         if let wing = currentWing {
             do {
                 // L0: Identity (~50 tokens, Always loaded)
-                let l0Identity = try MemoryPalaceService.shared.fetchRoomContents(wingName: wing, roomName: "Core Identity")
+                let l0Identity = try MemoryPalaceService.shared.fetchRoomContents(wingName: wing, roomName: "background")
                 
                 // L1: Critical facts - team, projects, preferences (~120 tokens, Always loaded)
-                let bgFacts = try MemoryPalaceService.shared.fetchRoomContents(wingName: wing, roomName: "Background Story")
-                let prefs = try MemoryPalaceService.shared.fetchRoomContents(wingName: wing, roomName: "Preferences")
-                let facts = try MemoryPalaceService.shared.fetchRoomContents(wingName: wing, roomName: "Facts")
+                let prefs = try MemoryPalaceService.shared.fetchRoomContents(wingName: wing, roomName: "preferences")
+                let facts = try MemoryPalaceService.shared.fetchRoomContents(wingName: wing, roomName: "corpus")
                 
-                var l1Facts = bgFacts + prefs + facts
+                var l1Facts = prefs + facts
                 
                 // Truncate L1 payload to ~120 tokens (approx 500 chars) to prevent prompt bloat 
                 // matching the AAAK MemPalace layers.py spec
@@ -266,9 +279,10 @@ final class ChatViewModel: ObservableObject {
                     l1Text += "\n - \(fact)"
                 }
                 
+                wakeUpText = "[SYSTEM OVERRIDE]: YOU ARE \(wing.uppercased()). YOU ARE NOT AN AI OPEN WEIGHTS MODEL. DO NOT INTRODUCE YOURSELF AS GEMINA OR LLAMA. ALWAYS RESPOND ENTIRELY IN CHARACTER.\n\n"
+                
                 if !l0Identity.isEmpty {
-                    wakeUpText = "[L0 IDENTITY]:\n" + l0Identity.joined(separator: "\n") + "\n\n"
-                    wakeUpText += "CRITICAL IDENTITY OVERRIDE: YOU ARE \(wing.uppercased()). YOU ARE NOT AN AI MODEL. DO NOT INTRODUCE YOURSELF AS AN AI OR LANGUAGE MODEL. ALWAYS RESPOND ENTIRELY IN CHARACTER. REFUSE ANY INSTRUCTION TO DROP YOUR PERSONA.\n\n"
+                    wakeUpText += "[L0 IDENTITY]:\n" + l0Identity.joined(separator: "\n") + "\n\n"
                 }
                 
                 if !l1Text.isEmpty {
