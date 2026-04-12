@@ -81,7 +81,7 @@ Benchmark results for `gemma-4-26b-a4b-it-4bit` (26B MoE, 4-bit) on M5 Pro 64 GB
 - 🔌 **OpenAI-compatible**: Drop-in replacement for OpenAI SDKs (`/v1/chat/completions`, streaming, etc).
 - 🧠 **Smart Model Routing**: Loads HuggingFace format models directly, with native Safetensors parsing.
 - ⚡️ **TurboQuantization Integrated**: Custom low-level MLX Metal primitives that apply extremely fast quantization for KV caching out-of-the-box.
-- 💾 **SSD Expert Streaming (10x)**: High-performance NVMe streaming that loads Mixture of Experts (MoE) layers directly from SSD to GPU — achieving **10x speedup** (0.58 → 5.91 tok/s) on 122B+ models with only ~10 GB resident memory. Uses cross-projection batching, concurrent pread (QD=24), asyncEval pipeline, and runtime top-k expert selection.
+- 💾 **SSD Expert Streaming (10x)**: High-performance NVMe streaming that loads Mixture of Experts (MoE) layers directly from SSD to GPU — engineered by [@ericjlake](https://github.com/ericjlake), achieving **10x speedup** (0.58 → 5.91 tok/s) on 122B+ models with only ~10 GB resident memory. Uses cross-projection batching, concurrent pread (QD=24), asyncEval pipeline, and runtime top-k expert selection.
 - 🔮 **Speculative Decoding**: Load a small draft model (e.g. 9B) alongside a large main model to generate candidate tokens and verify in bulk — accelerating in-RAM inference.
 - 🎛️ **Granular Memory Control**: Integrated Layer Partitioning (`--gpu-layers`) and Wisdom Auto-Calibration for squeezing massive models into RAM.
 
