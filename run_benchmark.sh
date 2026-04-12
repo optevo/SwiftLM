@@ -501,8 +501,11 @@ if [ "$suite_opt" == "6" ]; then
     curl -sL "https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&q=80&w=320" -o "$IMAGE_PATH"
     
     AUDIO_PATH="./tmp/omni_audio_test"
-    curl -sL "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" -o "${AUDIO_PATH}.mp3" 
-    echo "Converting MP3 to WAV..."
+    echo "Downloading real audio sample..."
+    curl -sL "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" -o "${AUDIO_PATH}.mp3"
+    
+    echo "Converting MP3 to WAV for engine pipeline ingestion..."
+    # afconvert converts mp3 to standardized WAV under macOS natively without ffmpeg dependencies
     afconvert -f WAVE -d LEI16 "${AUDIO_PATH}.mp3" "${AUDIO_PATH}.wav" 
     
     if [ ! -f "$IMAGE_PATH" ] || [ ! -f "${AUDIO_PATH}.wav" ]; then
@@ -551,12 +554,50 @@ EOF
         echo "❌ ERROR: Server dropped the connection or crashed!"
         exit 1
     fi
-    OMNI_RES=$(echo "$RAW_OMNI_OUT" | python3 -c "import sys,json;d=json.load(sys.stdin);print('🤖 Omni Output:', d.get('choices',[{}])[0].get('message',{}).get('content', 'ERROR').replace('\n', '<br/>'))")
+    OMNI_RES=$(echo "$RAW_OMNI_OUT" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('choices',[{}])[0].get('message',{}).get('content', 'ERROR').replace('\n', '<br/>'))")
     if [ -z "$OMNI_RES" ] || [[ "$OMNI_RES" == *"ERROR"* ]]; then
         echo "❌ ERROR: JSON Decode failed!"
         exit 1
     fi
-    echo -e "\n$OMNI_RES"
+    
+    echo -e "\n🤖 Omni Output: $OMNI_RES"
+    
+    if [ "$HEADLESS" != "1" ]; then
+        UI_FILE="/tmp/swiftlm_omni_result.html"
+        cat <<EOF > "$UI_FILE"
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SwiftLM Omni Pipeline Demo</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 40px; background: #0f1115; color: #e1e4e8; line-height: 1.5; }
+    .container { max-width: 800px; margin: 0 auto; background: #1a1c23; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+    img { max-width: 100%; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+    .prompt { background: #21252d; padding: 15px; border-left: 4px solid #00ffcc; border-radius: 4px; margin-bottom: 20px; font-weight: 500; font-size: 14px; color: #a1aabf; }
+    .response { background: #16181e; padding: 20px; border-radius: 8px; font-size: 16px; color: #ffffff; border: 1px solid #252932; text-shadow: 0 1px 2px rgba(0,0,0,0.5); margin-top: 20px; }
+    h2 { color: #f5f6f8; font-weight: 600; letter-spacing: -0.5px; margin-top: 0; }
+    audio { width: 100%; margin-top: 10px; margin-bottom: 20px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🌐 SwiftLM Omni Pipeline</h2>
+    <div style="font-size: 13px; color: #727a8e; margin-top: -15px; margin-bottom: 20px;">Model: $FULL_MODEL</div>
+    <img src="data:image/jpeg;base64,${BASE64_IMG}" />
+    <audio controls>
+      <source src="data:audio/wav;base64,${BASE64_AUDIO}" type="audio/wav">
+      Your browser does not support the audio element.
+    </audio>
+    <div class="prompt">Prompt: Describe the image and then describe the audio.</div>
+    <div class="response">🤖 Omni Output: $OMNI_RES</div>
+  </div>
+</body>
+</html>
+EOF
+        open "$UI_FILE"
+    fi
     
     echo ""
     echo "✅ Test Complete! Omni evaluation successful."
