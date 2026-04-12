@@ -2434,6 +2434,11 @@ public struct OmniUserInputProcessor: UserInputProcessor, @unchecked Sendable {
         
         let tokens = vlmInput.text.tokens.asArray(Int.self)
         
+        // If the VLM processor already natively extracted and processed the audio, do NOT mangle its layout with dummy interleaving!
+        if vlmInput.audio != nil {
+            return vlmInput
+        }
+        
         if !input.audio.isEmpty && !tokens.isEmpty {
             print("[Omni] Interleaving Audio Tokens into VLM prompt structure.")
             let rawSequence = fusionProcessor.interleave(
