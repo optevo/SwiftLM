@@ -149,7 +149,7 @@ Reference implementations: [`turboquant-mlx`](https://github.com/sharpner/turboq
 
 ## 💾 SSD Expert Streaming: 10x MoE Speedup
 
-SwiftLM implements a **rewritten SSD expert streaming pipeline** that achieves 10x generation speedup for massive Mixture of Experts (MoE) models running on memory-constrained Apple Silicon. This enables running models like **Qwen3.5-122B** (69.6 GB) and **Qwen3.5-397B** (209 GB) on a **64 GB Mac** by streaming expert weights from NVMe SSD.
+SwiftLM implements a **rewritten SSD expert streaming pipeline** (engineered by [Eric Lake](https://github.com/ericjlake)) that achieves 10x generation speedup for massive Mixture of Experts (MoE) models running on memory-constrained Apple Silicon. This enables running models like **Qwen3.5-122B** (69.6 GB) and **Qwen3.5-397B** (209 GB) on a **64 GB Mac** by streaming expert weights from NVMe SSD.
 
 ### Benchmark Results (M1 Ultra 64GB, Qwen3.5-122B-A10B-4bit)
 
