@@ -21,8 +21,8 @@ set -euo pipefail
 BINARY="${1:-.build/release/SwiftLM}"
 PORT="${2:-15414}"
 HOST="127.0.0.1"
-MAIN_MODEL="${MAIN_MODEL:-mlx-community/Qwen3.5-4B-4bit}"
-DRAFT_MODEL="${DRAFT_MODEL:-mlx-community/Qwen3.5-0.8B-MLX-4bit}"
+MAIN_MODEL="${MAIN_MODEL:-mlx-community/Qwen2.5-3B-Instruct-4bit}"
+DRAFT_MODEL="${DRAFT_MODEL:-mlx-community/Qwen2.5-0.5B-Instruct-4bit}"
 NUM_DRAFT_TOKENS=4
 URL="http://${HOST}:${PORT}"
 PASS=0
@@ -74,7 +74,7 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 echo -e "\n${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║  SwiftLM Speculative Decoding E2E Test                  ║${NC}"
-echo -e "${CYAN}║  Draft: Qwen3.5-0.8B (4-bit) → Main: Qwen3.5-9B (4-bit)║${NC}"
+echo -e "${CYAN}║  Draft: Qwen2.5-0.5B (4-bit) → Main: Qwen2.5-3B (4-bit) ║${NC}"
 echo -e "${CYAN}║  Draft tokens per round: ${NUM_DRAFT_TOKENS}                              ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}\n"
 
