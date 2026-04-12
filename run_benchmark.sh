@@ -124,6 +124,7 @@ if [ "$suite_opt" == "4" ]; then
 elif [ "$suite_opt" == "5" ] || [ "$suite_opt" == "6" ]; then
     options=(
         "mlx-community/gemma-4-e4b-it-8bit"
+        "mlx-community/gemma-4-e4b-it-4bit"
         "mlx-community/gemma-4-26b-a4b-it-4bit"
         "mlx-community/Qwen2-Audio-7B-Instruct-4bit"
         "Custom (Enter your own Hub ID)"
