@@ -2441,7 +2441,7 @@ public struct OmniUserInputProcessor: UserInputProcessor, @unchecked Sendable {
                 numAudioEmbeddings: numAudioEmbeddings,
                 audioFirst: false // Append audio after vision context typically
             )
-            return LMInput(text: .init(tokens: MLXArray(rawSequence)), image: vlmInput.image)
+            return LMInput(text: .init(tokens: MLXArray(rawSequence)), image: vlmInput.image, audio: vlmInput.audio)
         }
         
         return vlmInput
