@@ -107,12 +107,12 @@ jobs:
           path: /tmp/SwiftLM-test-*.log
           retention-days: 7
 
-  # ── Speculative Decoding E2E (dual-model: 0.8B draft + 9B main) ──
-  # Requires macos-15-xlarge (14 GB) — standard runner (7 GB) can't fit
-  # two models simultaneously. Tests the novel "small model helps large
+  # ── Speculative Decoding E2E (dual-model: 0.8B draft + 4B main) ──
+  # Uses the standard macos-15 runner (7 GB RAM). The combined 
+  # memory is ~4 GB. Tests the novel "small model helps large
   # model" speculative decoding path from PR #26.
   speculative-decoding:
-    runs-on: macos-15-xlarge
+    runs-on: macos-15
     timeout-minutes: 45
     needs: ci  # Only run after core CI passes
     steps:

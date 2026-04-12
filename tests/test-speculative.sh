@@ -2,7 +2,7 @@
 # test-speculative.sh — Speculative decoding E2E verification
 #
 # Uses a small draft model (Qwen3.5-0.8B) to accelerate a larger main model
-# (Qwen3.5-9B) via speculative decoding. Verifies:
+# (Qwen3.5-4B) via speculative decoding. Verifies:
 #   1. Dual-model loading (draft + main)
 #   2. Speculative decoding path activation
 #   3. Correct token generation
@@ -12,8 +12,8 @@
 #   ./tests/test-speculative.sh [binary_path] [port]
 #
 # Requirements:
-#   - ~6 GB RAM (0.8B draft ~0.6 GB + 9B main ~5.5 GB)
-#   - macos-15-xlarge (14 GB) on GitHub Actions
+#   - ~4 GB RAM (0.8B draft ~1 GB + 4B main ~3 GB)
+#   - macos-15 (7 GB) on GitHub Actions is sufficient
 #   - curl, jq
 
 set -euo pipefail
@@ -21,7 +21,7 @@ set -euo pipefail
 BINARY="${1:-.build/release/SwiftLM}"
 PORT="${2:-15414}"
 HOST="127.0.0.1"
-MAIN_MODEL="mlx-community/Qwen3.5-9B-4bit"
+MAIN_MODEL="mlx-community/Qwen3.5-4B-4bit"
 DRAFT_MODEL="mlx-community/Qwen3.5-0.8B-MLX-4bit"
 NUM_DRAFT_TOKENS=4
 URL="http://${HOST}:${PORT}"
