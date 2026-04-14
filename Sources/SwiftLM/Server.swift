@@ -427,7 +427,9 @@ struct MLXServer: AsyncParsableCommand {
         } else if isAudio {
             print("[SwiftLM] Loading ALM (audio-language model)...")
             let downloader = HubDownloader(hub: HubApi(downloadBase: cacheRoot))
-            container = try await ALMModelFactory.shared.loadContainer(
+            // Use OmniModelFactory (VLM-backed) so Gemma4's audio tower is loaded
+            // and the native prepareForMultimodal path extracts real mel features.
+            container = try await OmniModelFactory.shared.loadContainer(
                 from: downloader,
                 using: TransformersTokenizerLoader(),
                 configuration: modelConfig
@@ -1117,6 +1119,7 @@ func handleChatCompletion(
     }
     let templateContext: [String: any Sendable]? = enableThinking ? nil : ["enable_thinking": false]
     let userInput = UserInput(chat: chatMessages, tools: toolSpecs, additionalContext: templateContext)
+    print("[Server Debug] Created UserInput with \(userInput.images.count) images and \(userInput.audio.count) audio inputs.")
     let lmInput = try await container.prepare(input: userInput)
 
     // ── Prompt caching: full token sequence for prefix matching ──
