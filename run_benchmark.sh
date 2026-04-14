@@ -399,12 +399,11 @@ if [ "$suite_opt" == "5" ]; then
     
     mkdir -p tmp
     AUDIO_PATH="./tmp/audio_test"
-    # Small test audio clip (we assume standard tools and curl).
-    curl -sL "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" -o "${AUDIO_PATH}.mp3" 
-    
-    echo "Converting MP3 to WAV for engine pipeline ingestion..."
-    # afconvert converts mp3 to standardized WAV under macOS natively without ffmpeg dependencies
-    afconvert -f WAVE -d LEI16 "${AUDIO_PATH}.mp3" "${AUDIO_PATH}.wav" 
+    # Generate a speech sample via macOS TTS for a proper transcription test.
+    # Using 'say' with Samantha voice at normal rate for a clean, reproducible payload.
+    say -v Samantha -r 150 --file-format=WAVE --data-format=LEI16@16000 \
+        "The quick brown fox jumps over the lazy dog. Machine learning systems require careful validation." \
+        -o "${AUDIO_PATH}.wav"
     
     if [ ! -f "${AUDIO_PATH}.wav" ]; then
         echo "Failed to convert audio via afconvert."
@@ -483,7 +482,7 @@ EOF
     },
     {
       "role": "user",
-      "content": "Are there any instruments playing in this audio track? List them."
+      "content": "What animal is mentioned in the audio you just transcribed? Respond in one sentence."
     }
   ]
 }
@@ -508,7 +507,7 @@ EOF
     echo "Cleaning up..."
     killall SwiftLM
     wait $SERVER_PID 2>/dev/null
-    rm -f /tmp/alm_payload_1.json /tmp/alm_payload_2.json "${AUDIO_PATH}.wav" "${AUDIO_PATH}.mp3"
+    rm -f /tmp/alm_payload_1.json /tmp/alm_payload_2.json "${AUDIO_PATH}.wav"
     exit 0
 fi
 
@@ -524,7 +523,7 @@ if [ "$suite_opt" == "6" ]; then
     AUDIO_PATH="./tmp/omni_audio_test"
     echo "Generating real audio sample via TTS..."
     say "Warning! A dog has been detected on the security camera footage!" -o "${AUDIO_PATH}.aiff"
-    afconvert -f WAVE -d LEI16 "${AUDIO_PATH}.aiff" "${AUDIO_PATH}.wav"
+    afconvert -f WAVE -d LEI16@16000 "${AUDIO_PATH}.aiff" "${AUDIO_PATH}.wav"
     
 
     
@@ -541,12 +540,12 @@ if [ "$suite_opt" == "6" ]; then
     cat <<EOF > /tmp/omni_payload.json
 {
   "model": "$FULL_MODEL",
-  "max_tokens": 100,
+  "max_tokens": 400,
   "messages": [
     {
       "role": "user",
       "content": [
-        {"type": "text", "text": "Describe the image and then describe the audio."},
+        {"type": "text", "text": "First describe what you see in the image. Then transcribe exactly what you hear in the audio."},
         {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,${BASE64_IMG}"}},
         {"type": "input_audio", "input_audio": {"data": "${BASE64_AUDIO}", "format": "wav"}}
       ]
