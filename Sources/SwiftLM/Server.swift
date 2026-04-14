@@ -2458,7 +2458,10 @@ public final class ALMModelFactory: ModelFactory, @unchecked Sendable {
         configuration: ResolvedModelConfiguration,
         tokenizerLoader: any TokenizerLoader
     ) async throws -> ModelContext {
-        let context = try await LLMModelFactory.shared._load(configuration: configuration, tokenizerLoader: tokenizerLoader)
+        // Use VLMModelFactory so the Gemma4 audio tower and embedding projector are
+        // correctly initialized. LLMModelFactory omits the VLM type registry, which
+        // prevents the audio tower from loading regardless of quantization level.
+        let context = try await VLMModelFactory.shared._load(configuration: configuration, tokenizerLoader: tokenizerLoader)
         
         let numAudioEmbeddings = OmniModelFactory.extractNumAudioEmbeddings(configuration: configuration)
         let messageGenerator = DefaultMessageGenerator()

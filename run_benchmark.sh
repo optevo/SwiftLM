@@ -417,7 +417,8 @@ if [ "$suite_opt" == "5" ]; then
     cat <<EOF > /tmp/alm_payload_1.json
 {
   "model": "$FULL_MODEL",
-  "max_tokens": 100,
+  "max_tokens": 500,
+  "thinking": false,
   "messages": [
     {
       "role": "user",
@@ -432,6 +433,12 @@ EOF
 
     echo "Starting Server in background with --audio..."
     killall SwiftLM 2>/dev/null
+    # Wait for port 5431 to fully drain before starting fresh server
+    for i in {1..15}; do
+        lsof -ti tcp:5431 > /dev/null 2>&1 || break
+        sleep 0.5
+    done
+    : > ./tmp/alm_server.log  # Truncate stale log
     $BIN --model "$FULL_MODEL" --audio --port 5431 > ./tmp/alm_server.log 2>&1 &
     SERVER_PID=$!
     
@@ -467,7 +474,8 @@ EOF
     cat <<EOF > /tmp/alm_payload_2.json
 {
   "model": "$FULL_MODEL",
-  "max_tokens": 100,
+  "max_tokens": 500,
+  "thinking": false,
   "messages": [
     {
       "role": "user",
@@ -482,7 +490,7 @@ EOF
     },
     {
       "role": "user",
-      "content": "What animal is mentioned in the audio you just transcribed? Respond in one sentence."
+      "content": "According to the audio you just transcribed, what do machine learning systems require? Answer concisely."
     }
   ]
 }
