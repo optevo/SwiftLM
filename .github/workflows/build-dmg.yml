@@ -19,6 +19,10 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Generate Xcode Project
+        run: |
+          cd SwiftBuddy && python3 generate_xcodeproj.py
+
       - name: Build Ad-Hoc App
         run: |
           # Build the raw unsigned .app binary directly to bypass xcodebuild archive restrictions
