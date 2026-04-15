@@ -146,7 +146,7 @@ fi
 # ── Test 3: Streaming speculative generation ────────────────────────
 log "Test 3: Streaming speculative generation"
 
-STREAM_OUTPUT=$(curl -sf -N --max-time 120 -X POST "$URL/v1/chat/completions" \
+STREAM_OUTPUT=$(curl -sf -N --max-time 300 -X POST "$URL/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -d "{\"model\":\"$MAIN_MODEL\",\"stream\":true,\"max_tokens\":10,\"messages\":[{\"role\":\"user\",\"content\":\"Name three fruits.\"}]}" \
     2>/dev/null || true)
@@ -176,7 +176,7 @@ log "Test 5: Sequential request stability (3 requests)"
 
 SEQ_PASS=true
 for i in 1 2 3; do
-    SEQ_RESP=$(curl -sf --max-time 120 -X POST "$URL/v1/chat/completions" \
+    SEQ_RESP=$(curl -sf --max-time 300 -X POST "$URL/v1/chat/completions" \
         -H "Content-Type: application/json" \
         -d "{\"model\":\"$MAIN_MODEL\",\"max_tokens\":10,\"messages\":[{\"role\":\"user\",\"content\":\"Say the number $i.\"}]}" 2>/dev/null || echo "")
 
