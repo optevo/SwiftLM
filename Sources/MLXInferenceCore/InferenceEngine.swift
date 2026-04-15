@@ -405,7 +405,7 @@ public final class InferenceEngine: ObservableObject {
                     
                     // Approximate the input token size (as LMInput wrapper blocks direct inspection without private API)
                     // MLX often counts 1 word roughly as 1.3 tokens. 
-                    let stringLength = mlxMessages.map { ($0["content"] as? String ?? "").count }.reduce(0, +)
+                    let stringLength = mlxMessages.map { ($0["content"] ?? "").count }.reduce(0, +)
                     let baseTokens = Int(Double(stringLength) / 3.5)
                     self.activeContextTokens = baseTokens
                     

@@ -4,12 +4,9 @@ import MLX
 public actor ALMTypeRegistry {
     public static let shared = ALMTypeRegistry()
     
-    private var creators: [String: @Sendable () -> Any] = [:]
+    private var creators: [String: @Sendable () -> Any] = ["whisper": { WhisperModelCreator() }]
     
-    private init() {
-        // Feature 8: Register Whisper
-        register(creator: { WhisperModelCreator() }, for: "whisper")
-    }
+    private init() {}
     
     public func register(creator: @escaping @Sendable () -> (Any), for key: String) {
         creators[key] = creator
