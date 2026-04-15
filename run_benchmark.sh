@@ -455,7 +455,7 @@ EOF
         echo "❌ ERROR: Server dropped the connection or crashed!"
         exit 1
     fi
-    # Extract content and strip any thinking blocks (server-strips most, belt-and-suspenders for any remainder)
+    # Extract content and strip any thinking blocks (Gemma4 <|channel|>thought...)<channel|>)
     ALM_RES=$(echo "$RAW_ALM_OUT" | python3 -c "
 import sys, json, re
 d = json.load(sys.stdin)
@@ -464,7 +464,7 @@ gen_tok = d.get('usage',{}).get('completion_tokens', 0)
 # Strip Gemma4 thinking blocks: <|channel|>thought ... <channel|>
 content = re.sub(r'<\|channel\|>thought.*?<channel\|>', '', content, flags=re.DOTALL).strip()
 if not content:
-    print(f'[WARN: gen_tokens={gen_tok}, empty response]')
+    print(f'[WARN: gen_tokens={gen_tok}, empty after stripping thinking]')
 else:
     print(content)
 ")
@@ -475,7 +475,7 @@ else:
     echo -e "\n🎤 ALM Turn 1 Transcription:\n  → $ALM_RES\n"
     
     echo "Generating /tmp/alm_payload_2.json (Turn 2 - Closed Loop)..."
-    ASSISTANT_CONTENT_ESCAPED=$(echo "$RAW_ALM_OUT" | python3 -c "import sys,json;print(json.dumps(json.load(sys.stdin).get('choices',[{}])[0].get('message',{}).get('content', '')))")
+    ASSISTANT_CONTENT_ESCAPED=$(echo "$RAW_ALM_OUT" | python3 -c "import sys,json;print(json.dumps(json.load(sys.stdin).get('choices',[{}])[0].get('message',{}).get('content', 'ERROR')))")
     
     cat <<EOF > /tmp/alm_payload_2.json
 {
