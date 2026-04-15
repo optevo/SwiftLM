@@ -266,7 +266,7 @@ final class ChatViewModel: ObservableObject {
                 let prefs = try MemoryPalaceService.shared.fetchRoomContents(wingName: wing, roomName: "preferences")
                 let facts = try MemoryPalaceService.shared.fetchRoomContents(wingName: wing, roomName: "corpus")
                 
-                var l1Facts = prefs + facts
+                let l1Facts = prefs + facts
                 
                 // Truncate L1 payload to ~120 tokens (approx 500 chars) to prevent prompt bloat 
                 // matching the AAAK MemPalace layers.py spec

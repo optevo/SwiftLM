@@ -110,7 +110,7 @@ struct MindPalaceView: View {
         .onAppear {
             initializeGraph()
         }
-        .onChange(of: triples.count) { _ in
+        .onChange(of: triples.count) { _, _ in
             initializeGraph() // Re-init if new edges arrive!
         }
         #if os(macOS)

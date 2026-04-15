@@ -73,7 +73,7 @@ struct RootView: View {
                     viewModel.engine = engine
                     viewModel.modelContext = modelContext
                 }
-                .onChange(of: engine.state) { _, state in
+                .onChange(of: engine.state) { _, _ in
                 }
                 .overlay {
                     if registry.isSyncing {
@@ -565,7 +565,7 @@ struct PersonaExtractionOverlay: View {
                             .padding()
                             .background(Color.black)
                             .border(Color.green.opacity(0.5), width: 1)
-                            .onChange(of: registry.currentChunkText) { _ in
+                            .onChange(of: registry.currentChunkText) { _, _ in
                                 scrollProxy.scrollTo("bottom")
                             }
                         }
