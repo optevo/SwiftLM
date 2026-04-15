@@ -99,8 +99,8 @@ for i in $(seq 1 "$MAX_WAIT"); do
         break
     fi
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-        echo "Error: Server process died. Last 30 lines of log:"
-        tail -30 "$LOG_FILE"
+        echo "Error: Server process died. Server Log:"
+        cat "$LOG_FILE"
         exit 1
     fi
     # Print progress every 30 seconds
@@ -112,8 +112,8 @@ done
 
 if ! curl -sf "$URL/health" >/dev/null 2>&1; then
     echo "Error: Server did not become ready in ${MAX_WAIT}s"
-    echo "Last 30 lines of log:"
-    tail -30 "$LOG_FILE"
+    echo "Server Log:"
+    cat "$LOG_FILE"
     exit 1
 fi
 
@@ -225,12 +225,12 @@ log "═════════════════════════
 
 if [ "$FAIL" -gt 0 ]; then
     echo ""
-    log "Server log tail (last 20 lines):"
-    tail -20 "$LOG_FILE"
+    log "Server completely failed. Full Log:"
+    cat "$LOG_FILE"
     exit 1
 fi
 
 echo ""
-log "Server log tail (last 20 lines):"
-tail -20 "$LOG_FILE"
+log "Server log tail (last 50 lines):"
+tail -50 "$LOG_FILE"
 exit 0
