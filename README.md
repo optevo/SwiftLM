@@ -254,7 +254,7 @@ The script provides an interactive menu to select any model and run one of two a
 Tests generation speed (TPS) and granular Apple Metal GPU memory allocation across extreme context lengths (e.g., `512, 40000, 100000` tokens).
 - Iterates over 4 configurations: Vanilla, SSD Streaming, TurboQuant, and SSD + TurboQuant.
 - Generates a rich ANSI console visualization with bar charts and a configuration scoreboard.
-- Saves the complete results matrix to `profiling_results_<hostname>.md`.
+- Saves the complete results matrix to `docs/profiling/profiling_results_<hostname>.md`.
 
 ### Test 2: Prompt Cache & Sliding Window Regression Test
 Verifies the stability of the engine's KV prompt cache when interleaving long contexts with sliding window attention bounds.

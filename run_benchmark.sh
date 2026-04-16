@@ -843,7 +843,7 @@ python3 -u scripts/profiling/profile_runner.py \
   --model "$FULL_MODEL" \
   --contexts "$CONTEXTS" \
   $EXTRA_FLAGS \
-  --out "./profiling_results_$(hostname -s).md"
+  --out "./docs/profiling/profiling_results_$(hostname -s).md"
 
 echo ""
-echo "✅ Benchmark finished! Results saved to ./profiling_results_$(hostname -s).md"
+echo "✅ Benchmark finished! Results saved to ./docs/profiling/profiling_results_$(hostname -s).md"
