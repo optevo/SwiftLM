@@ -22,8 +22,8 @@ jobs:
         if: ${{ github.event.client_payload.source_repo == 'mlx-swift' }}
         run: |
           echo "Bumping SharpAI/mlx-swift to ${{ github.event.client_payload.new_tag }}"
-          # Pinned via exact: in Package.swift — update the version string in-place
-          sed -i "s|SharpAI/mlx-swift.git\", exact: \"[^\"]*\"|SharpAI/mlx-swift.git\", exact: \"${{ github.event.client_payload.new_tag }}\"|" Package.swift
+          # Pinned via revision: in Package.swift — update the version string in-place
+          sed -i "s|SharpAI/mlx-swift.git\", revision: \"[^\"]*\"|SharpAI/mlx-swift.git\", revision: \"${{ github.event.client_payload.new_tag }}\"|" Package.swift
 
       - name: Update swift-mlx-lm dependencies
         if: ${{ github.event.client_payload.source_repo == 'mlx-swift-lm' }}
