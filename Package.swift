@@ -11,7 +11,7 @@ let package = Package(
     ],
     dependencies: [
         // Local Apple MLX Swift fork for C++ extensions
-        .package(url: "https://github.com/SharpAI/mlx-swift.git", branch: "main"),
+        .package(path: "./mlx-swift"),
         // Apple's LLM library built on MLX Swift (SharpAI fork — with GPU/CPU layer partitioning)
         .package(path: "./mlx-swift-lm"),
         // HuggingFace tokenizers + model download
