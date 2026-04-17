@@ -90,7 +90,7 @@ mkdir -p /tmp/vision_test
 BASE64_IMG="iVBORw0KGgoAAAANSUhEUgAAABwAAAAcCAIAAAD9b0jDAAAAGUlEQVR4nO3BMQEAAADCoPVPbQdvoAAA6DQJTAABRMAOLAAAAABJRU5ErkJggg=="
 
 run_case "mlx-community/Qwen2-VL-2B-Instruct-4bit" "$BASE_PORT" "yes"
-run_case "LiquidAI/LFM2.5-VL-450M-MLX-4bit" "$((BASE_PORT + 1))" "no"
+run_case "LiquidAI/LFM2.5-VL-450M-MLX-4bit" "$((BASE_PORT + 1))" "yes"
 
 rm -rf /tmp/vision_test
 exit 0
