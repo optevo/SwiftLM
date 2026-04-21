@@ -16,6 +16,7 @@ import HTTPTypes
 import Hummingbird
 import Hub
 import MLX
+import MLXEmbedders
 import MLXLLM
 import MLXLMCommon
 import MLXVLM
@@ -260,6 +261,12 @@ struct MLXServer: AsyncParsableCommand {
     @Flag(name: .long, help: "Enable 16-worker background SSD thread pool queue (PAPPS). Requires --stream-experts.")
     var ssdPrefetch: Bool = false
 
+    @Flag(name: .long, help: "Load as embedding model and serve POST /v1/embeddings (uses MLXEmbedders, supports Matryoshka dimensions)")
+    var embed: Bool = false
+
+    @Option(name: .long, help: "Embedding batch size: flush when this many texts are queued (default: 64)")
+    var embedBatchSize: Int = 64
+
     @Flag(name: .long, help: "Enable TurboQuant KV-cache compression (3-bit PolarQuant+QJL). Compresses KV history > 8192 tokens to ~3.5 bits/token — recommended for 100k+ context. Default: disabled")
     var turboKV: Bool = false
 
@@ -295,6 +302,16 @@ struct MLXServer: AsyncParsableCommand {
         // Inject streaming flag into config to bypass eval(model) if requested
         if self.streamExperts {
             modelConfig.lazyLoad = true
+        }
+
+        // ── Embedding mode (--embed): skip all LLM/profiling logic ──
+        if self.embed {
+            try await runEmbeddingServer(
+                modelId: modelId, modelConfig: modelConfig,
+                host: self.host, port: self.port,
+                batchSize: self.embedBatchSize
+            )
+            return
         }
 
         // ── Pre-load profiling ──
@@ -2592,4 +2609,124 @@ public final class OmniModelFactory: ModelFactory, @unchecked Sendable {
         }
         return 128
     }
+}
+
+// ── Embedding server (--embed mode) ──────────────────────────────────────────
+
+/// Start a Hummingbird server that serves POST /v1/embeddings with dynamic batching.
+/// Called from MLXServer.run() when --embed is set; returns when the server exits.
+func runEmbeddingServer(
+    modelId: String,
+    modelConfig: ModelConfiguration,
+    host: String,
+    port: Int,
+    batchSize: Int
+) async throws {
+    print("[SwiftLM] Loading embedding model...")
+    let cacheRoot = URL.applicationSupportDirectory
+        .appendingPathComponent("MLX", isDirectory: true)
+        .appendingPathComponent("HuggingFace", isDirectory: true)
+    let hub = HubApi(downloadBase: cacheRoot)
+    let embedContainer = try await EmbedderModelFactory.shared.loadContainer(
+        from: HubDownloader(hub: hub),
+        using: TransformersTokenizerLoader(),
+        configuration: modelConfig
+    ) { _ in }  // progress handler: silent (model is local)
+
+    // Single batcher shared across all request handlers.
+    // Accumulates concurrent requests and dispatches them as one GPU batch.
+    // Uses a pipeline approach: while GPU is busy with batch N, HTTP layer
+    // accumulates batch N+1 (no timer or Task.sleep — avoids MLX Metal allocator crash).
+    let batcher = EmbeddingBatcher(
+        container: embedContainer,
+        maxBatchTexts: batchSize
+    )
+    print("[SwiftLM] Embedding model loaded (max_batch_texts=\(batchSize)). Starting HTTP server on \(host):\(port)")
+
+    let router = Router()
+
+    router.get("/health") { _, _ -> Response in
+        let payload = """
+        {"status":"ok","model":"\(modelId)","type":"embedding","batch":{"max_texts":\(batchSize)}}
+        """
+        return Response(status: .ok, headers: jsonHeaders(), body: .init(byteBuffer: ByteBuffer(string: payload)))
+    }
+
+    router.get("/v1/models") { _, _ -> Response in
+        let created = Int(Date().timeIntervalSince1970)
+        let payload = """
+        {"object":"list","data":[{"id":"\(modelId)","object":"model","created":\(created),"owned_by":"local"}]}
+        """
+        return Response(status: .ok, headers: jsonHeaders(), body: .init(byteBuffer: ByteBuffer(string: payload)))
+    }
+
+    router.post("/v1/embeddings") { request, _ -> Response in
+        do {
+            let bodyData = try await collectBody(request)
+            return try await handleEmbedding(bodyData: bodyData, modelId: modelId, batcher: batcher)
+        } catch {
+            let errMsg = String(describing: error).replacingOccurrences(of: "\"", with: "'")
+            let payload = "{\"error\":{\"message\":\"\(errMsg)\",\"type\":\"server_error\",\"code\":\"internal_error\"}}"
+            return Response(status: .internalServerError, headers: jsonHeaders(), body: .init(byteBuffer: ByteBuffer(string: payload)))
+        }
+    }
+
+    print("[SwiftLM] ✅ Embedding server ready. Listening on http://\(host):\(port)")
+    let readyJson = "{\"event\":\"ready\",\"port\":\(port),\"model\":\"\(modelId)\",\"engine\":\"mlx\",\"type\":\"embedding\"}"
+    print(readyJson)
+    fflush(stdout)
+
+    let app = Application(router: router, configuration: .init(address: .hostname(host, port: port)))
+    try await app.run()
+}
+
+/// Handle a POST /v1/embeddings request.
+///
+/// Parses the request, validates input, and submits to the EmbeddingBatcher.
+/// All inference logic (tokenise → forward → pool → normalise) lives in the batcher
+/// so that concurrent requests are automatically coalesced into large GPU batches.
+func handleEmbedding(
+    bodyData: Data,
+    modelId: String,
+    batcher: EmbeddingBatcher
+) async throws -> Response {
+    // ── Parse request ──
+    guard let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] else {
+        let payload = "{\"error\":{\"message\":\"Invalid JSON body\",\"type\":\"invalid_request_error\",\"code\":\"parse_error\"}}"
+        return Response(status: .badRequest, headers: jsonHeaders(), body: .init(byteBuffer: ByteBuffer(string: payload)))
+    }
+
+    let inputRaw = json["input"]
+    let texts: [String]
+    if let s = inputRaw as? String {
+        texts = [s]
+    } else if let arr = inputRaw as? [String] {
+        texts = arr
+    } else {
+        let payload = "{\"error\":{\"message\":\"input must be a string or array of strings\",\"type\":\"invalid_request_error\",\"code\":\"invalid_input\"}}"
+        return Response(status: .badRequest, headers: jsonHeaders(), body: .init(byteBuffer: ByteBuffer(string: payload)))
+    }
+    guard !texts.isEmpty else {
+        let payload = "{\"error\":{\"message\":\"input must not be empty\",\"type\":\"invalid_request_error\",\"code\":\"invalid_input\"}}"
+        return Response(status: .badRequest, headers: jsonHeaders(), body: .init(byteBuffer: ByteBuffer(string: payload)))
+    }
+
+    let task       = json["task"] as? String ?? "retrieval.query"
+    let dimensions = json["dimensions"] as? Int
+
+    // ── Submit to batcher (suspends until the batch this job lands in completes) ──
+    let embeddings = try await batcher.submit(texts: texts, task: task, dimensions: dimensions)
+
+    // ── Build OpenAI-compatible response ──
+    var dataItems = [String]()
+    for (i, emb) in embeddings.enumerated() {
+        let embStr = emb.map { String($0) }.joined(separator: ",")
+        dataItems.append("{\"object\":\"embedding\",\"index\":\(i),\"embedding\":[\(embStr)]}")
+    }
+    // Approximate token count (word-split, mirrors the jina-embed reference)
+    let promptTokens = texts.reduce(0) { $0 + $1.split(separator: " ").count }
+    let payload = """
+    {"object":"list","data":[\(dataItems.joined(separator: ","))],"model":"\(modelId)","usage":{"prompt_tokens":\(promptTokens),"total_tokens":\(promptTokens)}}
+    """
+    return Response(status: .ok, headers: jsonHeaders(), body: .init(byteBuffer: ByteBuffer(string: payload)))
 }

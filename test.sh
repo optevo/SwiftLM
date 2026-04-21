@@ -79,11 +79,14 @@ MODELS=(
 
     # ── On-demand: fallback reasoning ────────────────────────────────────────
     "DeepSeek-R1-Distill-Qwen-32B-4bit|text||150"
+
+    # ── On-demand: embedding server ──────────────────────────────────────────
+    "jina-embeddings-v5-text-small-retrieval-mlx|embed|--embed|60"
+    "jina-embeddings-v5-text-nano-retrieval-mlx|embed|--embed|60"
 )
 
 # Models explicitly NOT tested (not SwiftLM-compatible — different loaders)
 NOT_SWIFTLM=(
-    "jina-embeddings-v5-text-small-retrieval-mlx"   # jina-embed server
     "parakeet-tdt-0.6b-v3"                          # mlx-audio
     "whisper-large-v3-turbo"                        # mlx-audio
 )
@@ -157,6 +160,15 @@ run_completion() {
         -X POST "$BASE_URL/v1/chat/completions" \
         -H "Content-Type: application/json" \
         -d '{"messages":[{"role":"user","content":"Reply with the single word: PONG"}],"max_tokens":5}' \
+        2>&1
+}
+
+run_embedding() {
+    curl -sf \
+        --max-time "$COMPLETION_TIMEOUT" \
+        -X POST "$BASE_URL/v1/embeddings" \
+        -H "Content-Type: application/json" \
+        -d '{"input":"Hello world","task":"retrieval.query"}' \
         2>&1
 }
 
@@ -282,49 +294,189 @@ for entry in "${DEDUPED_MODELS[@]}"; do
         info "SSD streaming confirmed (strategy=$strategy)"
     fi
 
-    # ── Completion smoke test ───────────────────────────────────────────────
-    echo -n "  Completion smoke test ... "
-    response=$(run_completion)
-    curl_exit=$?
+    # ── Smoke test — branch on loader type ─────────────────────────────────
+    if [ "$loader_type" = "embed" ]; then
+        # ── Embedding: single-request smoke test ────────────────────────────
+        echo -n "  Embedding smoke test (single) ... "
+        response=$(run_embedding)
+        curl_exit=$?
 
-    if [ $curl_exit -ne 0 ]; then
-        fail "curl error (exit $curl_exit): $response"
-        show_log_tail
-        FAILED+=("$model_name — curl error $curl_exit")
-        kill_server
-        rm -f "$SERVER_LOG"; SERVER_LOG=""
-        continue
+        if [ $curl_exit -ne 0 ]; then
+            fail "curl error (exit $curl_exit): $response"
+            show_log_tail
+            FAILED+=("$model_name — curl error $curl_exit")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        http_object=$(echo "$response" | jq -r '.object // ""' 2>/dev/null)
+        emb_len=$(echo "$response"     | jq -r '.data[0].embedding | length' 2>/dev/null)
+
+        if [ "$http_object" != "list" ]; then
+            fail "unexpected response object: $http_object"
+            echo "  Raw response: $response"
+            show_log_tail
+            FAILED+=("$model_name — bad response object: $http_object")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        if [ -z "$emb_len" ] || [ "$emb_len" -le 0 ] 2>/dev/null; then
+            fail "empty embedding in response"
+            echo "  Raw response: $(echo "$response" | head -c 200)"
+            show_log_tail
+            FAILED+=("$model_name — empty embedding")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        ok "dim=${emb_len}"
+
+        # ── Embedding: concurrent batch test (validates dynamic batching) ───
+        # Fire EMBED_CONCURRENCY requests simultaneously; all should land in
+        # the same or consecutive batch windows and complete correctly.
+        EMBED_CONCURRENCY=32
+        echo -n "  Embedding batch test (${EMBED_CONCURRENCY} concurrent) ... "
+
+        embed_pids=()
+        embed_tmps=()
+        for i in $(seq 1 "$EMBED_CONCURRENCY"); do
+            tmp=$(mktemp /tmp/swiftlm-embed-XXXXXX)
+            embed_tmps+=("$tmp")
+            curl -sf --max-time 30 \
+                -X POST "$BASE_URL/v1/embeddings" \
+                -H "Content-Type: application/json" \
+                -d "{\"input\":\"Batch throughput test sentence number $i\",\"task\":\"retrieval.query\"}" \
+                -o "$tmp" &
+            embed_pids+=($!)
+        done
+
+        embed_curl_failed=0
+        for pid in "${embed_pids[@]}"; do
+            wait "$pid" || embed_curl_failed=$((embed_curl_failed + 1))
+        done
+
+        embed_bad=0
+        embed_dim=0
+        for tmp in "${embed_tmps[@]}"; do
+            obj=$(jq -r '.object // ""' "$tmp" 2>/dev/null)
+            dim=$(jq -r '.data[0].embedding | length' "$tmp" 2>/dev/null)
+            if [ "$obj" != "list" ] || ! [ "${dim:-0}" -gt 0 ] 2>/dev/null; then
+                embed_bad=$((embed_bad + 1))
+            else
+                embed_dim=$dim
+            fi
+            rm -f "$tmp"
+        done
+
+        if [ "$embed_curl_failed" -gt 0 ]; then
+            fail "${embed_curl_failed}/${EMBED_CONCURRENCY} concurrent requests failed (curl error)"
+            show_log_tail
+            FAILED+=("$model_name — batch test: ${embed_curl_failed} curl failures")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        if [ "$embed_bad" -gt 0 ]; then
+            fail "${embed_bad}/${EMBED_CONCURRENCY} concurrent responses invalid"
+            show_log_tail
+            FAILED+=("$model_name — batch test: ${embed_bad} invalid responses")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        ok "${EMBED_CONCURRENCY}/${EMBED_CONCURRENCY} responses correct (dim=${embed_dim})"
+
+        # ── Embedding: Matryoshka truncation test (dimensions=256) ──────────
+        echo -n "  Embedding dim=256 test (Matryoshka) ... "
+        mat_response=$(curl -sf --max-time "$COMPLETION_TIMEOUT" \
+            -X POST "$BASE_URL/v1/embeddings" \
+            -H "Content-Type: application/json" \
+            -d '{"input":"Matryoshka truncation test","task":"retrieval.query","dimensions":256}' \
+            2>&1)
+        mat_exit=$?
+
+        if [ $mat_exit -ne 0 ]; then
+            fail "curl error (exit $mat_exit): $mat_response"
+            show_log_tail
+            FAILED+=("$model_name — dim=256 test: curl error $mat_exit")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        mat_obj=$(echo "$mat_response" | jq -r '.object // ""' 2>/dev/null)
+        mat_dim=$(echo "$mat_response" | jq -r '.data[0].embedding | length' 2>/dev/null)
+
+        if [ "$mat_obj" != "list" ]; then
+            fail "unexpected response object: $mat_obj"
+            echo "  Raw: $(echo "$mat_response" | head -c 200)"
+            FAILED+=("$model_name — dim=256 test: bad object $mat_obj")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        if [ "${mat_dim:-0}" -ne 256 ] 2>/dev/null; then
+            fail "expected dim=256, got dim=${mat_dim}"
+            FAILED+=("$model_name — dim=256 test: got dim=${mat_dim}")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        ok "dim=${mat_dim} ✓"
+        PASSED+=("$model_name")
+    else
+        # ── Chat completion smoke test ──────────────────────────────────────
+        echo -n "  Completion smoke test ... "
+        response=$(run_completion)
+        curl_exit=$?
+
+        if [ $curl_exit -ne 0 ]; then
+            fail "curl error (exit $curl_exit): $response"
+            show_log_tail
+            FAILED+=("$model_name — curl error $curl_exit")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        http_object=$(echo "$response" | jq -r '.object // ""' 2>/dev/null)
+        content=$(echo "$response"     | jq -r '.choices[0].message.content // ""' 2>/dev/null)
+
+        if [ "$http_object" != "chat.completion" ]; then
+            fail "unexpected response object: $http_object"
+            echo "  Raw response: $response"
+            show_log_tail
+            FAILED+=("$model_name — bad response object: $http_object")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        if [ -z "$content" ]; then
+            fail "empty content in completion response"
+            echo "  Raw response: $response"
+            show_log_tail
+            FAILED+=("$model_name — empty content")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        # ── Token throughput from health ────────────────────────────────────
+        health_after=$(curl -sf "$BASE_URL/health" 2>/dev/null || echo "{}")
+        tok_s=$(echo "$health_after" | jq -r '.stats.avg_tokens_per_sec // "?"' 2>/dev/null)
+
+        ok "response=$(echo "$content" | tr -d '\n' | head -c 60)  [${tok_s} tok/s]"
+        PASSED+=("$model_name")
     fi
-
-    http_object=$(echo "$response" | jq -r '.object // ""' 2>/dev/null)
-    content=$(echo "$response"     | jq -r '.choices[0].message.content // ""' 2>/dev/null)
-
-    if [ "$http_object" != "chat.completion" ]; then
-        fail "unexpected response object: $http_object"
-        echo "  Raw response: $response"
-        show_log_tail
-        FAILED+=("$model_name — bad response object: $http_object")
-        kill_server
-        rm -f "$SERVER_LOG"; SERVER_LOG=""
-        continue
-    fi
-
-    if [ -z "$content" ]; then
-        fail "empty content in completion response"
-        echo "  Raw response: $response"
-        show_log_tail
-        FAILED+=("$model_name — empty content")
-        kill_server
-        rm -f "$SERVER_LOG"; SERVER_LOG=""
-        continue
-    fi
-
-    # ── Token throughput from health ────────────────────────────────────────
-    health_after=$(curl -sf "$BASE_URL/health" 2>/dev/null || echo "{}")
-    tok_s=$(echo "$health_after" | jq -r '.stats.avg_tokens_per_sec // "?"' 2>/dev/null)
-
-    ok "response=$(echo "$content" | tr -d '\n' | head -c 60)  [${tok_s} tok/s]"
-    PASSED+=("$model_name")
 
     # ── Tear down before next model ─────────────────────────────────────────
     kill_server

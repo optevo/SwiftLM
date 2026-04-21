@@ -1,0 +1,148 @@
+[
+  {
+    "model": "DeepSeek-R1-Distill-Qwen-32B-4bit",
+    "type": "text",
+    "load_s": 2,
+    "mem_idle_mb": 17577,
+    "mem_peak_mb": 18165,
+    "ttft_ms": 1821,
+    "prefill_tps": 401,
+    "decode_tps": 32.7
+  },
+  {
+    "model": "FastVLM-0.5B-bf16",
+    "type": "vlm",
+    "load_s": 1,
+    "mem_idle_mb": 1188,
+    "mem_peak_mb": 1611,
+    "ttft_ms": 39,
+    "prefill_tps": 6560,
+    "decode_tps": 370.8
+  },
+  {
+    "model": "Qwen2.5-VL-3B-Instruct-6bit",
+    "type": "vlm",
+    "load_s": 1,
+    "mem_idle_mb": 3074,
+    "mem_peak_mb": 3608,
+    "ttft_ms": 30,
+    "prefill_tps": 4205,
+    "decode_tps": 139.6
+  },
+  {
+    "model": "Qwen3-Coder-480B-A35B-Instruct-4bit",
+    "type": "ssd",
+    "load_s": 1,
+    "mem_idle_mb": 0,
+    "mem_peak_mb": 48938,
+    "ttft_ms": 11230,
+    "prefill_tps": 17,
+    "decode_tps": 2.5
+  },
+  {
+    "model": "Qwen3.5-27B-4bit",
+    "type": "text",
+    "load_s": 2,
+    "mem_idle_mb": 14432,
+    "mem_peak_mb": 15462,
+    "ttft_ms": 386,
+    "prefill_tps": 412,
+    "decode_tps": 20.9
+  },
+  {
+    "model": "Qwen3.5-2B-4bit",
+    "type": "text",
+    "load_s": 1,
+    "mem_idle_mb": 1010,
+    "mem_peak_mb": 1593,
+    "ttft_ms": 16,
+    "prefill_tps": 5836,
+    "decode_tps": 316.1
+  },
+  {
+    "model": "Qwen3.5-397B-A17B-4bit",
+    "type": "ssd",
+    "load_s": 1,
+    "mem_idle_mb": 0,
+    "mem_peak_mb": 33357,
+    "ttft_ms": 5970,
+    "prefill_tps": 31,
+    "decode_tps": 26.1
+  },
+  {
+    "model": "Qwen3.5-4B-MLX-4bit",
+    "type": "text",
+    "load_s": 1,
+    "mem_idle_mb": 2257,
+    "mem_peak_mb": 3109,
+    "ttft_ms": 28,
+    "prefill_tps": 3242,
+    "decode_tps": 164.2
+  },
+  {
+    "model": "Qwen3.5-9B-MLX-4bit",
+    "type": "text",
+    "load_s": 1,
+    "mem_idle_mb": 4804,
+    "mem_peak_mb": 5619,
+    "ttft_ms": 83,
+    "prefill_tps": 549,
+    "decode_tps": 102.0
+  },
+  {
+    "model": "Qwen3.6-35B-A3B",
+    "type": "text",
+    "load_s": 2,
+    "mem_idle_mb": 19302,
+    "mem_peak_mb": 19688,
+    "ttft_ms": 209,
+    "prefill_tps": 743,
+    "decode_tps": 21.6
+  },
+  {
+    "model": "jina-embeddings-v5-text-nano-retrieval-mlx",
+    "type": "embed",
+    "load_s": 1,
+    "mem_idle_mb": null,
+    "latency": {
+      "p50_ms": 5,
+      "p95_ms": 28,
+      "p99_ms": 28
+    },
+    "throughput": {
+      "c1": 95.4,
+      "c4": 356.4,
+      "c8": 522.3,
+      "c16": 648.8,
+      "c32": 752.6
+    }
+  },
+  {
+    "model": "jina-embeddings-v5-text-small-retrieval-mlx",
+    "type": "embed",
+    "load_s": 1,
+    "mem_idle_mb": null,
+    "latency": {
+      "p50_ms": 6,
+      "p95_ms": 36,
+      "p99_ms": 36
+    },
+    "throughput": {
+      "c1": 131.5,
+      "c4": 188.2,
+      "c8": 451.4,
+      "c16": 708.7,
+      "c32": 1012.3
+    }
+  },
+  {
+    "model": "olmOCR-2-7B-1025-MLX-6bit",
+    "type": "vlm",
+    "load_s": 1,
+    "mem_idle_mb": 6593,
+    "mem_peak_mb": 7043,
+    "ttft_ms": 49,
+    "prefill_tps": 2326,
+    "decode_tps": 79.5
+  }
+]
