@@ -1,0 +1,12 @@
+[
+  {
+    "model": "Qwen3-Coder-Next-4bit",
+    "type": "text",
+    "load_s": 2,
+    "mem_idle_mb": 42766,
+    "mem_peak_mb": 43335,
+    "ttft_ms": 76,
+    "prefill_tps": 1338,
+    "decode_tps": 93.5
+  }
+]

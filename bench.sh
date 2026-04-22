@@ -30,11 +30,19 @@
 set -uo pipefail
 
 BINARY="${1:-.build/release/SwiftLM}"
+FILTER="${2:-}"   # optional: type (ssd|text|vlm|embed) or model name — run only matching models
 MODELS_DIR="${MODELS_DIR:-$HOME/models}"
 BENCH_PORT=18002
 BASE_URL="http://127.0.0.1:${BENCH_PORT}"
-OUT_MD="bench_results.md"
-OUT_JSON="bench_results.json"
+# When filtering, write to a separate file so the full results aren't overwritten
+if [[ -n "$FILTER" ]]; then
+    SAFE_FILTER="${FILTER//\//_}"
+    OUT_MD="bench_results_${SAFE_FILTER}.md"
+    OUT_JSON="bench_results_${SAFE_FILTER}.json"
+else
+    OUT_MD="bench_results.md"
+    OUT_JSON="bench_results.json"
+fi
 
 # ---------------------------------------------------------------------------
 # Colours
@@ -46,18 +54,24 @@ BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'; RED='\033[0;31m'
 # Model table  (name | type | extra_flags | load_timeout_s)
 # type: text | vlm | ssd | embed
 # ---------------------------------------------------------------------------
+
+# n_bench_runs (6th field) controls how many prefill+decode runs are averaged:
+#   3 = small models  (<= ~10B)  — fast enough for 3 runs
+#   2 = medium models (11–40B)   — 2 runs balances accuracy vs time
+#   1 = large / SSD models       — single run; SSD decode is too slow for repeats
 MODELS=(
-    "Qwen3.5-2B-4bit|text||60"
-    "Qwen3.5-4B-MLX-4bit|text||60"
-    "Qwen3.5-9B-MLX-4bit|text||90"
-    "Qwen3.6-35B-A3B|text||120"
-    "Qwen3.5-27B-4bit|text||120"
-    "DeepSeek-R1-Distill-Qwen-32B-4bit|text||150"
-    "Qwen3.5-397B-A17B-4bit|ssd|--stream-experts|240"
-    "Qwen3-Coder-480B-A35B-Instruct-4bit|ssd|--stream-experts|240"
-    "FastVLM-0.5B-bf16|vlm|--vision|60"
-    "olmOCR-2-7B-1025-MLX-6bit|vlm|--vision|90"
-    "Qwen2.5-VL-3B-Instruct-6bit|vlm|--vision|90"
+    "Qwen3.5-2B-4bit|text||60|3"
+    "Qwen3.5-4B-MLX-4bit|text||60|3"
+    "Qwen3.5-9B-MLX-4bit|text||90|3"
+    "Qwen3.6-35B-A3B|text||120|2"
+
+    "Qwen3-Coder-Next-4bit|text||120|2"
+    "DeepSeek-R1-Distill-Qwen-32B-4bit|text||150|2"
+    "Qwen3.5-397B-A17B-4bit|ssd|--stream-experts|240|1"
+    "Qwen3-Coder-480B-A35B-Instruct-4bit|ssd|--stream-experts|240|1"
+    "FastVLM-0.5B-bf16|vlm|--vision|60|3"
+    "olmOCR-2-7B-1025-MLX-6bit|vlm|--vision|90|2"
+    "Qwen2.5-VL-3B-Instruct-6bit|vlm|--vision|90|3"
     "jina-embeddings-v5-text-small-retrieval-mlx|embed|--embed|60"
     "jina-embeddings-v5-text-nano-retrieval-mlx|embed|--embed|60"
 )
@@ -80,11 +94,13 @@ DECODE_PROMPT="Explain in detail how transformer self-attention works, including
 # ---------------------------------------------------------------------------
 SERVER_PID=""
 SERVER_LOG=""
+PM_PID=""; PM_LOG=""
 JSON_DIR=$(mktemp -d /tmp/swiftlm-bench-XXXXXX)
 
 cleanup() {
     [[ -n "$SERVER_PID" ]] && { kill -9 "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null || true; SERVER_PID=""; }
     [[ -n "$SERVER_LOG" ]] && rm -f "$SERVER_LOG"
+    pm_stop 2>/dev/null || true
     rm -rf "$JSON_DIR"
 }
 trap cleanup EXIT
@@ -97,6 +113,39 @@ step()   { echo -e "  ${YELLOW}▸${NC} $*"; }
 metric() { echo -e "  ${GREEN}◆${NC} $*"; }
 warn()   { echo -e "  ${YELLOW}⚠${NC}  $*"; }
 fail()   { echo -e "  ${RED}✗${NC}  $*"; }
+
+# GPU/ANE utilisation via sudo powermetrics (requires sudoers entry — see darwin-configuration.nix)
+pm_start() {
+    PM_LOG=$(mktemp /tmp/bench-pm-XXXXXX)
+    sudo /usr/bin/powermetrics --samplers cpu_power,gpu_power --sample-rate 200 \
+        > "$PM_LOG" 2>/dev/null &
+    PM_PID=$!
+}
+
+pm_stop() {
+    [[ -n "$PM_PID" ]] || return
+    sudo kill -TERM "$PM_PID" 2>/dev/null || true
+    sleep 0.5
+    wait "$PM_PID" 2>/dev/null || true
+    PM_PID=""
+}
+
+pm_stats() {
+    [[ -f "${PM_LOG:-}" ]] || { echo "- -"; return; }
+    python3 - "$PM_LOG" <<'PYEOF'
+import re, sys
+try:
+    txt = open(sys.argv[1]).read()
+except Exception:
+    print('- -'); sys.exit()
+gpu_vals = [float(m) for m in re.findall(r'GPU HW active residency:\s+([\d.]+)%', txt)]
+gpu = f'{sum(gpu_vals)/len(gpu_vals):.0f}' if gpu_vals else '-'
+ane_vals = [float(m) for m in re.findall(r'ANE Power:\s+([\d.]+)\s*mW', txt)]
+ane = f'{sum(ane_vals)/len(ane_vals):.0f}' if ane_vals else '-'
+print(gpu, ane)
+PYEOF
+    rm -f "$PM_LOG"; PM_LOG=""
+}
 
 start_server() {
     local path="$1" type="$2" flags="$3"
@@ -176,61 +225,78 @@ print(int(statistics.median(valid)) if valid else -1)
 PYEOF
 }
 
-# Prefill: non-streaming long prompt, max_tokens=1. Returns "elapsed_ms prompt_tokens".
+# Prefill: non-streaming long prompt, max_tokens=1. Runs n_runs times, returns median.
+# Output: "median_elapsed_ms prompt_tokens"
 bench_prefill() {
-    local prompt="$1"
-    python3 - "$BASE_URL" "$prompt" <<'PYEOF'
-import urllib.request, json, time, sys
+    local prompt="$1" n_runs="${2:-1}"
+    python3 - "$BASE_URL" "$prompt" "$n_runs" <<'PYEOF'
+import urllib.request, json, time, sys, statistics
 
 url    = sys.argv[1] + "/v1/chat/completions"
 prompt = sys.argv[2]
+n_runs = int(sys.argv[3])
 body   = json.dumps({
     "messages": [{"role": "user", "content": prompt}],
     "max_tokens": 1,
     "stream": False
 }).encode()
 
-req = urllib.request.Request(url, data=body,
-      headers={"Content-Type": "application/json"})
-t0 = time.perf_counter()
-try:
-    with urllib.request.urlopen(req, timeout=600) as r:
-        elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        data = json.loads(r.read())
-        toks = data.get("usage", {}).get("prompt_tokens", 0)
-        print(elapsed_ms, toks)
-except Exception:
+timings = []; toks = 0
+for _ in range(n_runs):
+    req = urllib.request.Request(url, data=body,
+          headers={"Content-Type": "application/json"})
+    t0 = time.perf_counter()
+    try:
+        with urllib.request.urlopen(req, timeout=600) as r:
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            data = json.loads(r.read())
+            toks = data.get("usage", {}).get("prompt_tokens", 0)
+            timings.append(elapsed_ms)
+    except Exception:
+        pass
+
+if not timings:
     print(-1, 0)
+else:
+    print(int(statistics.median(timings)), toks)
 PYEOF
 }
 
-# Decode: non-streaming, records completion_tokens and wall-clock time.
-# Returns "elapsed_ms completion_tokens".
+# Decode: non-streaming, n_runs repetitions, returns median elapsed and last ctoks.
+# Returns "median_elapsed_ms completion_tokens".
 bench_decode_run() {
-    local prompt="$1" max_tok="${2:-300}"
-    python3 - "$BASE_URL" "$prompt" "$max_tok" <<'PYEOF'
-import urllib.request, json, time, sys
+    local prompt="$1" max_tok="${2:-300}" n_runs="${3:-1}"
+    python3 - "$BASE_URL" "$prompt" "$max_tok" "$n_runs" <<'PYEOF'
+import urllib.request, json, time, sys, statistics
 
 url      = sys.argv[1] + "/v1/chat/completions"
 prompt   = sys.argv[2]
 max_tok  = int(sys.argv[3])
+n_runs   = int(sys.argv[4])
 body = json.dumps({
     "messages": [{"role": "user", "content": prompt}],
     "max_tokens": max_tok,
     "stream": False
 }).encode()
 
-req = urllib.request.Request(url, data=body,
-      headers={"Content-Type": "application/json"})
-t0 = time.perf_counter()
-try:
-    with urllib.request.urlopen(req, timeout=600) as r:
-        elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        data = json.loads(r.read())
-        ctoks = data.get("usage", {}).get("completion_tokens", 0)
-        print(elapsed_ms, ctoks)
-except Exception:
+timings = []; ctoks = 0
+for _ in range(n_runs):
+    req = urllib.request.Request(url, data=body,
+          headers={"Content-Type": "application/json"})
+    t0 = time.perf_counter()
+    try:
+        with urllib.request.urlopen(req, timeout=600) as r:
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            data = json.loads(r.read())
+            ctoks = data.get("usage", {}).get("completion_tokens", 0)
+            timings.append(elapsed_ms)
+    except Exception:
+        pass
+
+if not timings:
     print(-1, 0)
+else:
+    print(int(statistics.median(timings)), ctoks)
 PYEOF
 }
 
@@ -341,12 +407,13 @@ done
     echo ""
     echo "## Text / VLM / SSD Models"
     echo ""
-    printf "| %-44s | %-4s | %8s | %13s | %13s | %10s | %15s | %13s |\n" \
-        "Model" "Type" "Load (s)" "Mem idle (MB)" "Mem peak (MB)" "TTFT (ms)" "Prefill (tok/s)" "Decode (tok/s)"
-    printf "|%s|%s|%s|%s|%s|%s|%s|%s|\n" \
+    printf "| %-44s | %-4s | %8s | %13s | %13s | %9s | %9s | %10s | %15s | %13s |\n" \
+        "Model" "Type" "Load (s)" "Mem idle (MB)" "Mem peak (MB)" "GPU avg%" "ANE (mW)" "TTFT (ms)" "Prefill (tok/s)" "Decode (tok/s)"
+    printf "|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|\n" \
         "$(printf '%.0s-' {1..46})" "$(printf '%.0s-' {1..6})" \
         "$(printf '%.0s-' {1..10})" "$(printf '%.0s-' {1..15})" \
-        "$(printf '%.0s-' {1..15})" "$(printf '%.0s-' {1..12})" \
+        "$(printf '%.0s-' {1..15})" "$(printf '%.0s-' {1..11})" \
+        "$(printf '%.0s-' {1..11})" "$(printf '%.0s-' {1..12})" \
         "$(printf '%.0s-' {1..17})" "$(printf '%.0s-' {1..15})"
 } > "$OUT_MD"
 
@@ -354,8 +421,16 @@ done
 # Text / VLM / SSD benchmark loop
 # ---------------------------------------------------------------------------
 for entry in "${LLM_ENTRIES[@]}"; do
-    IFS='|' read -r model_name loader_type extra_flags load_timeout <<< "$entry"
+    IFS='|' read -r model_name loader_type extra_flags load_timeout n_bench_runs <<< "$entry"
+    n_bench_runs="${n_bench_runs:-1}"   # default 1 if not provided
     model_path="$MODELS_DIR/$model_name"
+
+    # Skip if a filter is active and this model doesn't match by type or name
+    if [[ -n "$FILTER" ]]; then
+        [[ "$FILTER" == "embed" ]] && continue                      # embed-only → skip all LLM
+        [[ "$loader_type" == "$FILTER" ]] && : ||                   # type match
+        [[ "$model_name"  == "$FILTER" ]] && : || continue          # name match
+    fi
 
     banner "$model_name  [$loader_type]"
 
@@ -391,15 +466,20 @@ for entry in "${LLM_ENTRIES[@]}"; do
     mem_idle=$(health_field '.memory.active_mb')
     metric "Memory idle: ${mem_idle} MB"
 
-    # ── TTFT ───────────────────────────────────────────────────────────────
-    step "TTFT — short prompt (${3:-3} runs, streaming) ..."
-    if [[ "$loader_type" == "ssd" ]]; then
-        # One run only — SSD models are slow
-        ttft_ms=$(bench_ttft "$SHORT_PROMPT" 5 1)
-    else
-        ttft_ms=$(bench_ttft "$SHORT_PROMPT" 50 3)
-    fi
-    metric "TTFT: ${ttft_ms} ms"
+    # ── Warmup ─────────────────────────────────────────────────────────────
+    # One untimed short completion warms JIT / caches before measurements.
+    step "Warmup (1 untimed completion) ..."
+    bench_decode_run "$SHORT_PROMPT" 10 1 >/dev/null 2>&1 || true
+
+    # ── TTFT + Prefill + Decode (GPU/ANE sampled across all three) ─────────
+    gpu_pct="-"; ane_mw="-"
+    pm_start
+
+    ttft_runs=7
+    [[ "$loader_type" == "ssd" ]] && ttft_runs=5   # SSD is slow; 5 is enough
+    step "TTFT — short prompt (${ttft_runs} runs, streaming) ..."
+    ttft_ms=$(bench_ttft "$SHORT_PROMPT" 50 "$ttft_runs")
+    metric "TTFT: ${ttft_ms} ms  (median of ${ttft_runs} runs)"
 
     # ── Prefill + Decode ───────────────────────────────────────────────────
     # SSD models use fewer decode tokens so the run completes in ~1-2 minutes
@@ -408,14 +488,14 @@ for entry in "${LLM_ENTRIES[@]}"; do
     mem_peak="-"; prefill_tps="-"; decode_tps="-"
 
     if [[ "$loader_type" == "ssd" ]]; then
-        decode_tokens=20
+        decode_tokens=150
     else
-        decode_tokens=300
+        decode_tokens=500
     fi
 
     # Prefill benchmark
-    step "Prefill — long prompt, max_tokens=1 ..."
-    prefill_result=$(bench_prefill "$LONG_PROMPT")
+    step "Prefill — long prompt, max_tokens=1 (${n_bench_runs} run(s), median) ..."
+    prefill_result=$(bench_prefill "$LONG_PROMPT" "$n_bench_runs")
     prefill_ms=$(awk '{print $1}' <<< "$prefill_result")
     prompt_toks=$(awk '{print $2}' <<< "$prefill_result")
 
@@ -428,8 +508,8 @@ for entry in "${LLM_ENTRIES[@]}"; do
     fi
 
     # Decode benchmark
-    step "Decode — ${decode_tokens} tokens, measuring tok/s ..."
-    decode_result=$(bench_decode_run "$DECODE_PROMPT" "$decode_tokens")
+    step "Decode — ${decode_tokens} tokens (${n_bench_runs} run(s), median tok/s) ..."
+    decode_result=$(bench_decode_run "$DECODE_PROMPT" "$decode_tokens" "$n_bench_runs")
     decode_elapsed=$(awk '{print $1}' <<< "$decode_result")
     decode_ctoks=$(awk '{print $2}' <<< "$decode_result")
 
@@ -447,30 +527,37 @@ print(f'{ctoks / (decode_ms/1000):.1f}')
         warn "Decode measurement failed"
     fi
 
+    pm_stop
+    read -r gpu_pct ane_mw <<< "$(pm_stats)"
+    metric "GPU avg: ${gpu_pct}%  ANE avg: ${ane_mw} mW"
+
     # Peak memory after generation
     mem_peak=$(health_field '.memory.peak_mb')
     metric "Memory peak: ${mem_peak} MB"
 
     # ── Write row ──────────────────────────────────────────────────────────
-    printf "| %-44s | %-4s | %8s | %13s | %13s | %10s | %15s | %13s |\n" \
+    printf "| %-44s | %-4s | %8s | %13s | %13s | %9s | %9s | %10s | %15s | %13s |\n" \
         "$model_name" "$loader_type" "$load_s" "$mem_idle" "$mem_peak" \
-        "$ttft_ms" "$prefill_tps" "$decode_tps" >> "$OUT_MD"
+        "$gpu_pct" "$ane_mw" "$ttft_ms" "$prefill_tps" "$decode_tps" >> "$OUT_MD"
 
     # JSON
     python3 - "$JSON_DIR/${model_name}.json" \
         "$model_name" "$loader_type" "$load_s" "$mem_idle" "$mem_peak" \
+        "$gpu_pct" "$ane_mw" \
         "$ttft_ms" "$prefill_tps" "$decode_tps" <<'PYEOF'
 import json, sys
 out_path = sys.argv[1]
 d = {
-    "model":       sys.argv[2],
-    "type":        sys.argv[3],
-    "load_s":      int(sys.argv[4])   if sys.argv[4].lstrip('-').isdigit() else None,
-    "mem_idle_mb": int(sys.argv[5])   if sys.argv[5].lstrip('-').isdigit() else None,
-    "mem_peak_mb": int(sys.argv[6])   if sys.argv[6].lstrip('-').isdigit() else None,
-    "ttft_ms":     int(sys.argv[7])   if sys.argv[7].lstrip('-').isdigit() else None,
-    "prefill_tps": int(sys.argv[8])   if sys.argv[8].lstrip('-').isdigit() else None,
-    "decode_tps":  float(sys.argv[9]) if sys.argv[9].replace('.','',1).lstrip('-').isdigit() else None,
+    "model":        sys.argv[2],
+    "type":         sys.argv[3],
+    "load_s":       int(sys.argv[4])   if sys.argv[4].lstrip('-').isdigit() else None,
+    "mem_idle_mb":  int(sys.argv[5])   if sys.argv[5].lstrip('-').isdigit() else None,
+    "mem_peak_mb":  int(sys.argv[6])   if sys.argv[6].lstrip('-').isdigit() else None,
+    "gpu_avg_pct":  int(sys.argv[7])   if sys.argv[7].lstrip('-').isdigit() else None,
+    "ane_avg_mw":   int(sys.argv[8])   if sys.argv[8].lstrip('-').isdigit() else None,
+    "ttft_ms":      int(sys.argv[9])   if sys.argv[9].lstrip('-').isdigit() else None,
+    "prefill_tps":  int(sys.argv[10])  if sys.argv[10].lstrip('-').isdigit() else None,
+    "decode_tps":   float(sys.argv[11]) if sys.argv[11].replace('.','',1).lstrip('-').isdigit() else None,
 }
 json.dump(d, open(out_path, 'w'), indent=2)
 PYEOF
@@ -485,19 +572,25 @@ done
     echo ""
     echo "## Embedding Models"
     echo ""
-    printf "| %-50s | %8s | %13s | %12s | %12s | %12s | %9s | %9s | %9s | %10s | %10s |\n" \
-        "Model" "Load (s)" "Mem idle (MB)" "Lat p50 (ms)" "Lat p95 (ms)" "Lat p99 (ms)" \
-        "@1 (req/s)" "@4 (req/s)" "@8 (req/s)" "@16 (req/s)" "@32 (req/s)"
-    printf "|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|\n" \
+    printf "| %-50s | %8s | %13s | %9s | %9s | %12s | %12s | %12s | %9s | %9s | %9s | %10s | %10s | %10s |\n" \
+        "Model" "Load (s)" "Mem idle (MB)" "GPU avg%" "ANE (mW)" "Lat p50 (ms)" "Lat p95 (ms)" "Lat p99 (ms)" \
+        "@1 (req/s)" "@4 (req/s)" "@8 (req/s)" "@16 (req/s)" "@32 (req/s)" "@64 (req/s)"
+    printf "|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|\n" \
         "$(printf '%.0s-' {1..52})" "$(printf '%.0s-' {1..10})" "$(printf '%.0s-' {1..15})" \
+        "$(printf '%.0s-' {1..11})" "$(printf '%.0s-' {1..11})" \
         "$(printf '%.0s-' {1..14})" "$(printf '%.0s-' {1..14})" "$(printf '%.0s-' {1..14})" \
         "$(printf '%.0s-' {1..11})" "$(printf '%.0s-' {1..11})" "$(printf '%.0s-' {1..11})" \
-        "$(printf '%.0s-' {1..12})" "$(printf '%.0s-' {1..12})"
+        "$(printf '%.0s-' {1..12})" "$(printf '%.0s-' {1..12})" "$(printf '%.0s-' {1..12})"
 } >> "$OUT_MD"
 
 for entry in "${EMBED_ENTRIES[@]}"; do
     IFS='|' read -r model_name loader_type extra_flags load_timeout <<< "$entry"
     model_path="$MODELS_DIR/$model_name"
+
+    # Skip embed loop when filtering for a non-embed type or specific model name
+    if [[ -n "$FILTER" && "$FILTER" != "embed" && "$model_name" != "$FILTER" ]]; then
+        continue
+    fi
 
     banner "$model_name  [embed]"
 
@@ -522,53 +615,61 @@ for entry in "${EMBED_ENTRIES[@]}"; do
     mem_idle=$(health_field '.memory.active_mb')
     metric "Memory idle: ${mem_idle} MB"
 
-    # ── Sequential latency (20 runs) ───────────────────────────────────────
-    step "Sequential latency (20 requests) ..."
-    lat_result=$(bench_embed_latency 20)
+    # ── Sequential latency + throughput (GPU/ANE sampled across both) ─────
+    gpu_pct="-"; ane_mw="-"
+    pm_start
+    step "Sequential latency (30 requests) ..."
+    lat_result=$(bench_embed_latency 30)
     lat_p50=$(awk '{print $1}' <<< "$lat_result")
     lat_p95=$(awk '{print $2}' <<< "$lat_result")
     lat_p99=$(awk '{print $3}' <<< "$lat_result")
     metric "Latency — p50=${lat_p50}ms  p95=${lat_p95}ms  p99=${lat_p99}ms"
 
     # ── Throughput sweep ───────────────────────────────────────────────────
-    step "Throughput sweep (1 / 4 / 8 / 16 / 32 concurrent, 3 trials each) ..."
+    step "Throughput sweep (1 / 4 / 8 / 16 / 32 / 64 concurrent, 3 trials each) ..."
     declare -A tput
-    for c in 1 4 8 16 32; do
+    for c in 1 4 8 16 32 64; do
         rps=$(bench_embed_throughput "$c" 3)
         tput[$c]="$rps"
         metric "  concurrency=${c}: ${rps} req/s"
     done
+    pm_stop
+    read -r gpu_pct ane_mw <<< "$(pm_stats)"
+    metric "GPU avg: ${gpu_pct}%  ANE avg: ${ane_mw} mW"
 
     # ── Write row ──────────────────────────────────────────────────────────
-    printf "| %-50s | %8s | %13s | %12s | %12s | %12s | %9s | %9s | %9s | %10s | %10s |\n" \
-        "$model_name" "$load_s" "$mem_idle" \
+    printf "| %-50s | %8s | %13s | %9s | %9s | %12s | %12s | %12s | %9s | %9s | %9s | %10s | %10s | %10s |\n" \
+        "$model_name" "$load_s" "$mem_idle" "$gpu_pct" "$ane_mw" \
         "$lat_p50" "$lat_p95" "$lat_p99" \
-        "${tput[1]}" "${tput[4]}" "${tput[8]}" "${tput[16]}" "${tput[32]}" \
+        "${tput[1]}" "${tput[4]}" "${tput[8]}" "${tput[16]}" "${tput[32]}" "${tput[64]}" \
         >> "$OUT_MD"
 
     python3 - "$JSON_DIR/${model_name}.json" \
-        "$model_name" "$load_s" "$mem_idle" \
+        "$model_name" "$load_s" "$mem_idle" "$gpu_pct" "$ane_mw" \
         "$lat_p50" "$lat_p95" "$lat_p99" \
-        "${tput[1]}" "${tput[4]}" "${tput[8]}" "${tput[16]}" "${tput[32]}" <<'PYEOF'
+        "${tput[1]}" "${tput[4]}" "${tput[8]}" "${tput[16]}" "${tput[32]}" "${tput[64]}" <<'PYEOF'
 import json, sys
 f = float
 out_path = sys.argv[1]
 json.dump({
-    "model":       sys.argv[2],
-    "type":        "embed",
-    "load_s":      int(sys.argv[3])   if sys.argv[3].lstrip('-').isdigit() else None,
-    "mem_idle_mb": int(sys.argv[4])   if sys.argv[4].lstrip('-').isdigit() else None,
+    "model":        sys.argv[2],
+    "type":         "embed",
+    "load_s":       int(sys.argv[3])   if sys.argv[3].lstrip('-').isdigit() else None,
+    "mem_idle_mb":  int(sys.argv[4])   if sys.argv[4].lstrip('-').isdigit() else None,
+    "gpu_avg_pct":  int(sys.argv[5])   if sys.argv[5].lstrip('-').isdigit() else None,
+    "ane_avg_mw":   int(sys.argv[6])   if sys.argv[6].lstrip('-').isdigit() else None,
     "latency": {
-        "p50_ms": int(sys.argv[5])    if sys.argv[5].lstrip('-').isdigit() else None,
-        "p95_ms": int(sys.argv[6])    if sys.argv[6].lstrip('-').isdigit() else None,
-        "p99_ms": int(sys.argv[7])    if sys.argv[7].lstrip('-').isdigit() else None,
+        "p50_ms": int(sys.argv[7])    if sys.argv[7].lstrip('-').isdigit() else None,
+        "p95_ms": int(sys.argv[8])    if sys.argv[8].lstrip('-').isdigit() else None,
+        "p99_ms": int(sys.argv[9])    if sys.argv[9].lstrip('-').isdigit() else None,
     },
     "throughput": {
-        "c1":  f(sys.argv[8])  if sys.argv[8].replace('.','',1).isdigit() else None,
-        "c4":  f(sys.argv[9])  if sys.argv[9].replace('.','',1).isdigit() else None,
-        "c8":  f(sys.argv[10]) if sys.argv[10].replace('.','',1).isdigit() else None,
-        "c16": f(sys.argv[11]) if sys.argv[11].replace('.','',1).isdigit() else None,
-        "c32": f(sys.argv[12]) if sys.argv[12].replace('.','',1).isdigit() else None,
+        "c1":  f(sys.argv[10]) if sys.argv[10].replace('.','',1).isdigit() else None,
+        "c4":  f(sys.argv[11]) if sys.argv[11].replace('.','',1).isdigit() else None,
+        "c8":  f(sys.argv[12]) if sys.argv[12].replace('.','',1).isdigit() else None,
+        "c16": f(sys.argv[13]) if sys.argv[13].replace('.','',1).isdigit() else None,
+        "c32": f(sys.argv[14]) if sys.argv[14].replace('.','',1).isdigit() else None,
+        "c64": f(sys.argv[15]) if sys.argv[15].replace('.','',1).isdigit() else None,
     }
 }, open(out_path, 'w'), indent=2)
 PYEOF
@@ -585,13 +686,17 @@ done
     echo ""
     echo "**Notes**"
     echo ""
-    echo "- **Memory**: MLX-tracked unified GPU/CPU memory from \`/health\` endpoint."
-    echo "- **TTFT**: streaming request, median of 3 runs (1 run for SSD models). Short prompt (~8 tokens)."
+    echo "- **Memory**: MLX-tracked unified GPU/CPU memory from \`/health\` endpoint (more accurate than OS RSS for GPU allocations)."
+    echo "- **GPU avg%**: mean GPU HW active residency during TTFT/prefill/decode or embed measurements, sampled at 200 ms intervals via \`sudo powermetrics\`."
+    echo "- **ANE avg mW**: mean Apple Neural Engine power draw during inference measurements."
+    echo "- **TTFT**: streaming request, median of 5 runs. Short prompt (~8 tokens)."
     echo "- **Prefill tok/s**: non-streaming long-prompt request (~500 tokens) with \`max_tokens=1\`; elapsed time ≈ prefill latency."
-    echo "- **Decode tok/s**: \`completion_tokens ÷ (total_time − TTFT)\` for a 300-token generation. Excludes prefill."
-    echo "- **SSD models**: only TTFT measured; 300-token generation takes 10+ minutes at current throughput."
-    echo "- **Embed latency**: 20 sequential single-text requests, percentiles computed from sorted timings."
-    echo "- **Embed throughput**: median of 3 concurrent-burst trials per concurrency level."
+    echo "- **Decode tok/s**: \`completion_tokens ÷ (total_time − TTFT)\` for a 500-token generation (150 tokens for SSD models). Excludes prefill."
+    echo "- **SSD models**: mem idle shows 0 (model not resident between requests); 150-token generation used due to low throughput."
+    echo "- **Embed latency**: 30 sequential single-text requests, percentiles computed from sorted timings."
+    echo "- **Embed throughput**: median of 3 concurrent-burst trials per concurrency level (1/4/8/16/32/64)."
+    echo "- **Prefill / Decode**: median of n_bench_runs runs (3 for small models, 2 for medium, 1 for large/SSD)."
+    echo "- **Warmup**: one untimed short completion runs before measurements to prime JIT and caches."
 } >> "$OUT_MD"
 
 # ---------------------------------------------------------------------------

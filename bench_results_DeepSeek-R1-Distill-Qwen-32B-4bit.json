@@ -1,0 +1,12 @@
+[
+  {
+    "model": "DeepSeek-R1-Distill-Qwen-32B-4bit",
+    "type": "text",
+    "load_s": 2,
+    "mem_idle_mb": 17577,
+    "mem_peak_mb": 18167,
+    "ttft_ms": 1822,
+    "prefill_tps": 521,
+    "decode_tps": 30.5
+  }
+]

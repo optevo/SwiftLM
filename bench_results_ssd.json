@@ -1,0 +1,22 @@
+[
+  {
+    "model": "Qwen3-Coder-480B-A35B-Instruct-4bit",
+    "type": "ssd",
+    "load_s": 1,
+    "mem_idle_mb": 0,
+    "mem_peak_mb": 48921,
+    "ttft_ms": 2147,
+    "prefill_tps": 12,
+    "decode_tps": 2.1
+  },
+  {
+    "model": "Qwen3.5-397B-A17B-4bit",
+    "type": "ssd",
+    "load_s": 1,
+    "mem_idle_mb": 0,
+    "mem_peak_mb": 33322,
+    "ttft_ms": 798,
+    "prefill_tps": 30,
+    "decode_tps": 6.3
+  }
+]

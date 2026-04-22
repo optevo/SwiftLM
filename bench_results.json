@@ -4,10 +4,10 @@
     "type": "text",
     "load_s": 2,
     "mem_idle_mb": 17577,
-    "mem_peak_mb": 18165,
-    "ttft_ms": 1821,
-    "prefill_tps": 401,
-    "decode_tps": 32.7
+    "mem_peak_mb": 18167,
+    "ttft_ms": 1822,
+    "prefill_tps": 521,
+    "decode_tps": 30.5
   },
   {
     "model": "FastVLM-0.5B-bf16",
@@ -40,15 +40,16 @@
     "decode_tps": 2.5
   },
   {
-    "model": "Qwen3.5-27B-4bit",
+    "model": "Qwen3-Coder-Next-4bit",
     "type": "text",
     "load_s": 2,
-    "mem_idle_mb": 14432,
-    "mem_peak_mb": 15462,
-    "ttft_ms": 386,
-    "prefill_tps": 412,
-    "decode_tps": 20.9
+    "mem_idle_mb": 42766,
+    "mem_peak_mb": 43335,
+    "ttft_ms": 76,
+    "prefill_tps": 1338,
+    "decode_tps": 93.5
   },
+
   {
     "model": "Qwen3.5-2B-4bit",
     "type": "text",

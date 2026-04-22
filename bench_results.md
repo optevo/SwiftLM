@@ -10,10 +10,11 @@ _2026-04-22 00:57:44 — binary: `SwiftLM`_
 | Qwen3.5-4B-MLX-4bit                          | text |        1 |          2257 |          3109 |         28 |            3242 |         164.2 |
 | Qwen3.5-9B-MLX-4bit                          | text |        1 |          4804 |          5619 |         83 |             549 |         102.0 |
 | Qwen3.6-35B-A3B                              | text |        2 |         19302 |         19688 |        209 |             743 |          21.6 |
-| Qwen3.5-27B-4bit                             | text |        2 |         14432 |         15462 |        386 |             412 |          20.9 |
-| DeepSeek-R1-Distill-Qwen-32B-4bit            | text |        2 |         17577 |         18165 |       1821 |             401 |          32.7 |
-| Qwen3.5-397B-A17B-4bit                       | ssd  |        1 |             0 |         33357 |       5970 |              31 |          26.1 |
-| Qwen3-Coder-480B-A35B-Instruct-4bit          | ssd  |        1 |             0 |         48938 |      11230 |              17 |           2.5 |
+| Qwen3-Coder-Next-4bit                        | text |        2 |         42766 |         43335 |         76 |            1338 |          93.5 |
+| DeepSeek-R1-Distill-Qwen-32B-4bit            | text |        2 |         17577 |         18167 |       1822 |             521 |          30.5 |
+
+| Qwen3.5-397B-A17B-4bit                       | ssd  |        1 |             0 |         33322 |        798 |              30 |           6.3 |
+| Qwen3-Coder-480B-A35B-Instruct-4bit          | ssd  |        1 |             0 |         48921 |       2147 |              12 |           2.1 |
 | FastVLM-0.5B-bf16                            | vlm  |        1 |          1188 |          1611 |         39 |            6560 |         370.8 |
 | olmOCR-2-7B-1025-MLX-6bit                    | vlm  |        1 |          6593 |          7043 |         49 |            2326 |          79.5 |
 | Qwen2.5-VL-3B-Instruct-6bit                  | vlm  |        1 |          3074 |          3608 |         30 |            4205 |         139.6 |
@@ -30,9 +31,9 @@ _2026-04-22 00:57:44 — binary: `SwiftLM`_
 **Notes**
 
 - **Memory**: MLX-tracked unified GPU/CPU memory from `/health` endpoint.
-- **TTFT**: streaming request, median of 3 runs (1 run for SSD models). Short prompt (~8 tokens).
+- **TTFT**: streaming request, median of 5 runs. Short prompt (~8 tokens).
 - **Prefill tok/s**: non-streaming long-prompt request (~500 tokens) with `max_tokens=1`; elapsed time ≈ prefill latency.
-- **Decode tok/s**: `completion_tokens ÷ (total_time − TTFT)` for a 300-token generation (20 tokens for SSD models). Excludes prefill.
-- **SSD models**: mem idle shows 0 (model not resident between requests); 20-token generation used due to low throughput.
+- **Decode tok/s**: `completion_tokens ÷ (total_time − TTFT)` for a 500-token generation (150 tokens for SSD models). Excludes prefill.
+- **SSD models**: mem idle shows 0 (model not resident between requests); 150-token generation used due to low throughput.
 - **Embed latency**: 20 sequential single-text requests, percentiles computed from sorted timings.
 - **Embed throughput**: median of 3 concurrent-burst trials per concurrency level.

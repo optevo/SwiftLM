@@ -1,0 +1,12 @@
+[
+  {
+    "model": "QwQ-32B-4bit",
+    "type": "text",
+    "load_s": 1,
+    "mem_idle_mb": 17577,
+    "mem_peak_mb": 18172,
+    "ttft_ms": 1825,
+    "prefill_tps": 136,
+    "decode_tps": 29.9
+  }
+]

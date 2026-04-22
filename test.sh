@@ -11,9 +11,10 @@
 # loading a 224–270 GB model without that flag would blow all available RAM.
 #
 # Usage:
-#   ./test.sh                      # uses .build/release/SwiftLM, ~/models
-#   ./test.sh /path/to/SwiftLM     # override binary
-#   MODELS_DIR=/alt/path ./test.sh # override model directory
+#   ./test.sh                              # uses .build/release/SwiftLM, ~/models
+#   ./test.sh /path/to/SwiftLM            # override binary
+#   ./test.sh /path/to/SwiftLM <filter>   # run only matching models (name or type)
+#   MODELS_DIR=/alt/path ./test.sh        # override model directory
 #
 # Requires: curl, jq
 # =============================================================================
@@ -21,6 +22,7 @@
 set -uo pipefail   # -e intentionally omitted — per-model failures must not abort
 
 BINARY="${1:-.build/release/SwiftLM}"
+FILTER="${2:-}"   # optional: loader type (text|vlm|ssd|embed) or model dir name
 MODELS_DIR="${MODELS_DIR:-$HOME/models}"
 TEST_PORT=18001
 BASE_URL="http://127.0.0.1:${TEST_PORT}"
@@ -59,7 +61,6 @@ MODELS=(
 
     # ── Always-on: large ────────────────────────────────────────────────────
     "Qwen3.6-35B-A3B|text||120"
-    "Qwen3.5-27B-4bit|text||120"
 
     # ── Always-on: thinker (SSD — MUST use --stream-experts) ────────────────
     "Qwen3.5-397B-A17B-4bit|ssd|--stream-experts|240"
@@ -68,7 +69,7 @@ MODELS=(
     "FastVLM-0.5B-bf16|vlm|--vision|60"
 
     # ── On-demand: coder ─────────────────────────────────────────────────────
-    "Qwen3.5-27B-4bit|text||120"   # also coder role
+    "Qwen3-Coder-Next-4bit|text||120"
 
     # ── On-demand: architect (SSD — MUST use --stream-experts) ──────────────
     "Qwen3-Coder-480B-A35B-Instruct-4bit|ssd|--stream-experts|240"
@@ -87,8 +88,11 @@ MODELS=(
 
 # Models explicitly NOT tested (not SwiftLM-compatible — different loaders)
 NOT_SWIFTLM=(
-    "parakeet-tdt-0.6b-v3"                          # mlx-audio
-    "whisper-large-v3-turbo"                        # mlx-audio
+    "parakeet-tdt-0.6b-v3"                          # mlx-audio (speech)
+    "whisper-large-v3-turbo"                        # mlx-audio (speech-multi)
+    "Voxtral-4B-TTS-2603-mlx-bf16"                  # mlx-audio (tts)
+    "Kokoro-82M-bf16"                               # mlx-audio (tts-fast)
+    "jina-reranker-v3-mlx"                          # rerank server (~/projects/rerank)
 )
 
 # ---------------------------------------------------------------------------
@@ -199,7 +203,7 @@ for m in "${NOT_SWIFTLM[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
-# Dedup model list (Qwen3.5-27B-4bit appears twice for router/coder roles)
+# Dedup model list (a model may appear in multiple role sections)
 # ---------------------------------------------------------------------------
 declare -A SEEN_MODELS
 DEDUPED_MODELS=()
@@ -219,6 +223,13 @@ for entry in "${DEDUPED_MODELS[@]}"; do
     model_path="$MODELS_DIR/$model_name"
 
     banner "$model_name  [$loader_type]"
+
+    # ── Skip if filter active and this model doesn't match ─────────────────
+    if [ -n "$FILTER" ]; then
+        if [ "$loader_type" != "$FILTER" ] && [ "$model_name" != "$FILTER" ]; then
+            continue
+        fi
+    fi
 
     # ── Skip if not downloaded ──────────────────────────────────────────────
     if [ ! -d "$model_path" ]; then

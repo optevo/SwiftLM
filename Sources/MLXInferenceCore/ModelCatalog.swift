@@ -122,15 +122,7 @@ public enum ModelCatalog {
             ramRequiredGB: 4.1,
             ramRecommendedGB: 6.0
         ),
-        ModelEntry(
-            id: "mlx-community/Qwen3.5-27B-4bit",
-            displayName: "Qwen 3.5 27B",
-            parameterSize: "27B",
-            quantization: "4-bit",
-            ramRequiredGB: 16.0,
-            ramRecommendedGB: 20.0,
-            badge: "🔬 Flagship"
-        ),
+
         // ── MoE models: ramRequiredGB = peak-resident (active experts only via mmap streaming)
         // File sizes are much larger but only active expert pages are in RAM at inference time.
         // These run via ExpertStreamingConfig on iPad Pro M4 (16GB+) and macOS.
