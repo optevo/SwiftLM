@@ -64,16 +64,17 @@ MODELS=(
     "Qwen3.5-4B-MLX-4bit|text||60|3"
     "Qwen3.5-9B-MLX-4bit|text||90|3"
     "Qwen3.6-35B-A3B|text||120|2"
+    "Qwen3.6-35B-A3B-VLM-4bit|vlm|--vision|180|2"
 
+    "Qwen3-VL-8B-Instruct-4bit|vlm|--vision|120|3"
     "Qwen3-Coder-Next-4bit|text||120|2"
     "DeepSeek-R1-Distill-Qwen-32B-4bit|text||150|2"
     "Qwen3.5-397B-A17B-4bit|ssd|--stream-experts|240|1"
     "Qwen3-Coder-480B-A35B-Instruct-4bit|ssd|--stream-experts|240|1"
-    "FastVLM-0.5B-bf16|vlm|--vision|60|3"
     "olmOCR-2-7B-1025-MLX-6bit|vlm|--vision|90|2"
-    "Qwen2.5-VL-3B-Instruct-6bit|vlm|--vision|90|3"
     "jina-embeddings-v5-text-small-retrieval-mlx|embed|--embed|60"
     "jina-embeddings-v5-text-nano-retrieval-mlx|embed|--embed|60"
+    "Qwen3-Embedding-8B|embed|--embed|90"
 )
 
 # ---------------------------------------------------------------------------
@@ -535,6 +536,22 @@ print(f'{ctoks / (decode_ms/1000):.1f}')
     mem_peak=$(health_field '.memory.peak_mb')
     metric "Memory peak: ${mem_peak} MB"
 
+    # ── VLM capability benchmarks ──────────────────────────────────────────
+    # Qualitative scoring for vision models: chart analysis, OCR, spatial
+    # reasoning — tuned to each model's documented strengths.
+    # Benchmarks run here (not in test.sh) because they measure quality, not
+    # correctness; results are informational, not a pass/fail gate.
+    cap_score="-"
+    if [[ "$loader_type" == "vlm" ]]; then
+        step "VLM capability benchmarks ..."
+        cap_raw=$(python3 tests/vision/run_model_tests.py "$model_name" "$BASE_URL" 2>&1 || true)
+        echo "$cap_raw" | sed 's/^/    /'
+        # Extract summary "N/M" from the final score line
+        cap_score=$(echo "$cap_raw" | grep -oE '[0-9]+/[0-9]+' | tail -1)
+        [[ -z "$cap_score" ]] && cap_score="-"
+        metric "Capability score: ${cap_score}"
+    fi
+
     # ── Write row ──────────────────────────────────────────────────────────
     printf "| %-44s | %-4s | %8s | %13s | %13s | %9s | %9s | %10s | %15s | %13s |\n" \
         "$model_name" "$loader_type" "$load_s" "$mem_idle" "$mem_peak" \
@@ -544,20 +561,21 @@ print(f'{ctoks / (decode_ms/1000):.1f}')
     python3 - "$JSON_DIR/${model_name}.json" \
         "$model_name" "$loader_type" "$load_s" "$mem_idle" "$mem_peak" \
         "$gpu_pct" "$ane_mw" \
-        "$ttft_ms" "$prefill_tps" "$decode_tps" <<'PYEOF'
+        "$ttft_ms" "$prefill_tps" "$decode_tps" "$cap_score" <<'PYEOF'
 import json, sys
 out_path = sys.argv[1]
 d = {
-    "model":        sys.argv[2],
-    "type":         sys.argv[3],
-    "load_s":       int(sys.argv[4])   if sys.argv[4].lstrip('-').isdigit() else None,
-    "mem_idle_mb":  int(sys.argv[5])   if sys.argv[5].lstrip('-').isdigit() else None,
-    "mem_peak_mb":  int(sys.argv[6])   if sys.argv[6].lstrip('-').isdigit() else None,
-    "gpu_avg_pct":  int(sys.argv[7])   if sys.argv[7].lstrip('-').isdigit() else None,
-    "ane_avg_mw":   int(sys.argv[8])   if sys.argv[8].lstrip('-').isdigit() else None,
-    "ttft_ms":      int(sys.argv[9])   if sys.argv[9].lstrip('-').isdigit() else None,
-    "prefill_tps":  int(sys.argv[10])  if sys.argv[10].lstrip('-').isdigit() else None,
-    "decode_tps":   float(sys.argv[11]) if sys.argv[11].replace('.','',1).lstrip('-').isdigit() else None,
+    "model":           sys.argv[2],
+    "type":            sys.argv[3],
+    "load_s":          int(sys.argv[4])   if sys.argv[4].lstrip('-').isdigit() else None,
+    "mem_idle_mb":     int(sys.argv[5])   if sys.argv[5].lstrip('-').isdigit() else None,
+    "mem_peak_mb":     int(sys.argv[6])   if sys.argv[6].lstrip('-').isdigit() else None,
+    "gpu_avg_pct":     int(sys.argv[7])   if sys.argv[7].lstrip('-').isdigit() else None,
+    "ane_avg_mw":      int(sys.argv[8])   if sys.argv[8].lstrip('-').isdigit() else None,
+    "ttft_ms":         int(sys.argv[9])   if sys.argv[9].lstrip('-').isdigit() else None,
+    "prefill_tps":     int(sys.argv[10])  if sys.argv[10].lstrip('-').isdigit() else None,
+    "decode_tps":      float(sys.argv[11]) if sys.argv[11].replace('.','',1).lstrip('-').isdigit() else None,
+    "capability_score": sys.argv[12] if sys.argv[12] != "-" else None,
 }
 json.dump(d, open(out_path, 'w'), indent=2)
 PYEOF

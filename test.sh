@@ -61,12 +61,13 @@ MODELS=(
 
     # ── Always-on: large ────────────────────────────────────────────────────
     "Qwen3.6-35B-A3B|text||120"
+    "Qwen3.6-35B-A3B-VLM-4bit|vlm|--vision|180"
 
     # ── Always-on: thinker (SSD — MUST use --stream-experts) ────────────────
     "Qwen3.5-397B-A17B-4bit|ssd|--stream-experts|240"
 
-    # ── Always-on: vision router ─────────────────────────────────────────────
-    "FastVLM-0.5B-bf16|vlm|--vision|60"
+    # ── Always-on: vision primary (tier-1 visual handler) ───────────────────
+    "Qwen3-VL-8B-Instruct-4bit|vlm|--vision|120"
 
     # ── On-demand: coder ─────────────────────────────────────────────────────
     "Qwen3-Coder-Next-4bit|text||120"
@@ -74,9 +75,8 @@ MODELS=(
     # ── On-demand: architect (SSD — MUST use --stream-experts) ──────────────
     "Qwen3-Coder-480B-A35B-Instruct-4bit|ssd|--stream-experts|240"
 
-    # ── On-demand: vision extractors ─────────────────────────────────────────
+    # ── On-demand: vision doc extractor (tier-2) ─────────────────────────────
     "olmOCR-2-7B-1025-MLX-6bit|vlm|--vision|90"
-    "Qwen2.5-VL-3B-Instruct-6bit|vlm|--vision|90"
 
     # ── On-demand: fallback reasoning ────────────────────────────────────────
     "DeepSeek-R1-Distill-Qwen-32B-4bit|text||150"
@@ -84,6 +84,7 @@ MODELS=(
     # ── On-demand: embedding server ──────────────────────────────────────────
     "jina-embeddings-v5-text-small-retrieval-mlx|embed|--embed|60"
     "jina-embeddings-v5-text-nano-retrieval-mlx|embed|--embed|60"
+    "Qwen3-Embedding-8B|embed|--embed|90"
 )
 
 # Models explicitly NOT tested (not SwiftLM-compatible — different loaders)
@@ -93,6 +94,7 @@ NOT_SWIFTLM=(
     "Voxtral-4B-TTS-2603-mlx-bf16"                  # mlx-audio (tts)
     "Kokoro-82M-bf16"                               # mlx-audio (tts-fast)
     "jina-reranker-v3-mlx"                          # rerank server (~/projects/rerank)
+    "Qwen3-Reranker-8B"                             # rerank server (~/projects/rerank)
 )
 
 # ---------------------------------------------------------------------------
@@ -173,6 +175,19 @@ run_embedding() {
         -X POST "$BASE_URL/v1/embeddings" \
         -H "Content-Type: application/json" \
         -d '{"input":"Hello world","task":"retrieval.query"}' \
+        2>&1
+}
+
+# 224×224 black PNG — 224 = LCM(28,32), satisfies both Qwen2-VL (patch=28) and Qwen3-VL (patch=32)
+BASE64_IMG="iVBORw0KGgoAAAANSUhEUgAAAOAAAADgCAIAAACVT/22AAAAqUlEQVR4nO3BMQEAAADCoPVPbQlPoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAvgZM/gABE/clzwAAAABJRU5ErkJggg=="
+
+run_vision_completion() {
+    local prompt="${1:-What colour is the image? Reply in one word.}"
+    curl -sf \
+        --max-time "$COMPLETION_TIMEOUT" \
+        -X POST "$BASE_URL/v1/chat/completions" \
+        -H "Content-Type: application/json" \
+        -d "{\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,${BASE64_IMG}\"}},{\"type\":\"text\",\"text\":\"${prompt}\"}]}],\"max_tokens\":20}" \
         2>&1
 }
 
@@ -306,7 +321,60 @@ for entry in "${DEDUPED_MODELS[@]}"; do
     fi
 
     # ── Smoke test — branch on loader type ─────────────────────────────────
-    if [ "$loader_type" = "embed" ]; then
+    if [ "$loader_type" = "vlm" ]; then
+        # ── Vision completion smoke test ────────────────────────────────────
+        # Sends a real multimodal request (image + text) to verify vision works.
+        # Uses a 224×224 black PNG — 224 = LCM(28,32), satisfies both Qwen2-VL and Qwen3-VL patch sizes.
+        echo -n "  Vision completion smoke test ... "
+        response=$(run_vision_completion)
+        curl_exit=$?
+
+        if [ $curl_exit -ne 0 ]; then
+            fail "curl error (exit $curl_exit): $response"
+            show_log_tail
+            FAILED+=("$model_name — curl error $curl_exit")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        http_object=$(echo "$response" | jq -r '.object // ""' 2>/dev/null)
+        content=$(echo "$response"     | jq -r '.choices[0].message.content // ""' 2>/dev/null)
+
+        if [ "$http_object" != "chat.completion" ]; then
+            fail "unexpected response object: $http_object"
+            echo "  Raw response: $response"
+            show_log_tail
+            FAILED+=("$model_name — bad response object: $http_object")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        if [ -z "$content" ]; then
+            fail "empty content in vision completion response"
+            echo "  Raw response: $response"
+            show_log_tail
+            FAILED+=("$model_name — empty vision content")
+            kill_server
+            rm -f "$SERVER_LOG"; SERVER_LOG=""
+            continue
+        fi
+
+        ok "vision=$(echo "$content" | tr -d '\n' | head -c 80)"
+        PASSED+=("$model_name")
+
+        # ── Capability benchmarks (informational — do not affect pass/fail) ──
+        # Scores chart analysis, OCR, spatial reasoning etc. per model strength.
+        # Results are logged for reference; a low score is a warning, not a failure.
+        # Full capability benchmarks also run in bench.sh alongside latency numbers.
+        if command -v python3 &>/dev/null; then
+            echo "  Capability benchmarks (informational):"
+            python3 tests/vision/run_model_tests.py "$model_name" "$BASE_URL" \
+                || true   # non-zero exit is noted above but does not fail the suite
+        fi
+
+    elif [ "$loader_type" = "embed" ]; then
         # ── Embedding: single-request smoke test ────────────────────────────
         echo -n "  Embedding smoke test (single) ... "
         response=$(run_embedding)
