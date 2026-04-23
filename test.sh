@@ -71,6 +71,7 @@ MODELS=(
 
     # ── On-demand: coder ─────────────────────────────────────────────────────
     "Qwen3-Coder-Next-4bit|text||120"
+    "Qwen3.6-27B-UD-MLX-4bit|text||150"
 
     # ── On-demand: architect (SSD — MUST use --stream-experts) ──────────────
     "Qwen3-Coder-480B-A35B-Instruct-4bit|ssd|--stream-experts|240"

@@ -68,6 +68,7 @@ MODELS=(
 
     "Qwen3-VL-8B-Instruct-4bit|vlm|--vision|120|3"
     "Qwen3-Coder-Next-4bit|text||120|2"
+    "Qwen3.6-27B-UD-MLX-4bit|text||150|2"
     "DeepSeek-R1-Distill-Qwen-32B-4bit|text||150|2"
     "Qwen3.5-397B-A17B-4bit|ssd|--stream-experts|240|1"
     "Qwen3-Coder-480B-A35B-Instruct-4bit|ssd|--stream-experts|240|1"

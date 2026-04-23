@@ -1,0 +1,15 @@
+[
+  {
+    "model": "Qwen3.6-27B-UD-MLX-4bit",
+    "type": "text",
+    "load_s": 1,
+    "mem_idle_mb": 24098,
+    "mem_peak_mb": 25006,
+    "gpu_avg_pct": 95,
+    "ane_avg_mw": 0,
+    "ttft_ms": 149,
+    "prefill_tps": 224,
+    "decode_tps": 21.0,
+    "capability_score": null
+  }
+]
